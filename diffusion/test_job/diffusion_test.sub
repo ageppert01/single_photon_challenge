@@ -20,7 +20,7 @@
 #  commands) and arguments to be passed to jobs. 
 #  $(Process) will be a integer number for each job, starting with "0"
 #  and increasing for the relevant number of jobs.
-executable = cua-wm.sh
+executable = diffusion_test.sh
 arguments = $(Process)
 
 ##########################################
