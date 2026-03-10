@@ -1,0 +1,83 @@
+# run_diffusion.sub
+
+##########################################
+############### Containers ###############
+
+# Provide HTCondor with the name of the Docker container
+# (Apptainer seems to also work, perhaps with different code)
+# If container  is hosted on a Docker registry other than DockerHub, 
+# just add the registry prefix before the container repository name
+# Example: quay.io in docker://quay.io/user/repo:tag
+# For more info: https://chtc.cs.wisc.edu/uw-research-computing/docker-jobs
+# For more info: https://chtc.cs.wisc.edu/uw-research-computing/apptainer-htc
+container_image = docker://pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime
+universe = container
+
+##########################################
+############# Script to Run ##############
+
+# Specify your executable (single binary or a script that runs several
+#  commands) and arguments to be passed to jobs. 
+#  $(Process) will be a integer number for each job, starting with "0"
+#  and increasing for the relevant number of jobs.
+executable = run_diffusion.sh
+arguments = $(Process)
+
+##########################################
+############## Logs Configs ##############
+
+# Specify the name of the log, standard error, and standard output (or
+# "screen output") files. Wherever you see $(Cluster), HTCondor will insert the 
+#  queue number assigned to this set of jobs at the time of submission.
+JobName = run-diffusion
+log = $(JobName)_$(Cluster)_$(Process).log
+error = $(JobName)_$(Cluster)_$(Process).err
+output = $(JobName)_$(Cluster)_$(Process).out
+
+##########################################
+############# File Transfer  #############
+# For more info: https://chtc.cs.wisc.edu/uw-research-computing/htc-job-file-transfer#default-behavior-for-transferring-output-files
+
+# Transfer files to and from compute node
+should_transfer_files = YES
+transfer_input_files = config.py, dataset.py, diffusion.py, model.py, requirements.txt, sample.py, train.py, utils.py
+transfer_output_files = mnist_diffusion
+#output_destination = file:///home/ageppert/single_photon_challenge/diffusion/
+#transfer_output_remaps = "mnist_diffusion = file:///home/ageppert/single_photon_challenge/diffusion/mnist_diffusion"
+when_to_transfer_output = ON_EXIT
+
+##########################################
+########## General Requirements ##########
+
+# Requirements (e.g., operating system) your job needs, what amount of
+# compute resources each job will need on the computer where it runs.
+request_cpus = 1
+request_memory = 40GB
+request_disk = 40GB
+
+##########################################
+############ GPU Requirements ############
+# For more info: https://chtc.cs.wisc.edu/uw-research-computing/gpu-jobs
+
+# If using GPUs, this flag is required
++WantGPULab = true
+
+# Can request "short", "medium", or "long"; default is "medium"
++GPUJobLength = "short" 
+
+# Request certain range of capabilities
+#gpus_minimum_capability = <version>
+#gpus_maximum_capability = <version>
+
+# Request minimum amount of GPU memory 
+gpus_minimum_memory = 16000
+
+# Indicate shorter/resumeable jobs, i.e., have ability to checkpoint
+#+is_resumable = true
+
+request_gpus = 1
+##########################################
+########## Number of Job Copies ##########
+
+# Run 1 instances of our job:
+queue 1
