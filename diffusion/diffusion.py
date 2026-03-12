@@ -50,7 +50,7 @@ class LinearNoiseScheduler:
 
 
 @torch.no_grad()
-def sample(
+def ddpm_sample(
     model: torch.nn.Module,
     scheduler: LinearNoiseScheduler,
     num_samples: int,

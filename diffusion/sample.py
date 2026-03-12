@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 
 from config import DEVICE, DIFFUSION_CONFIG, MODEL_CONFIG, TRAIN_CONFIG, checkpoint_path, generated_samples_path
-from diffusion import LinearNoiseScheduler, sample
+from diffusion import LinearNoiseScheduler, ddpm_sample
 from model import Unet
 from utils import load_checkpoint, save_image_grid
 
@@ -14,7 +14,7 @@ def main() -> None:
     model = load_checkpoint(model, checkpoint_path(), DEVICE)
 
     num_samples = 16
-    generated_samples = sample(
+    generated_samples = ddpm_sample(
         model=model,
         scheduler=scheduler,
         num_samples=num_samples,
