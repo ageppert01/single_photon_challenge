@@ -41,7 +41,7 @@ output = $(JobName)_$(Cluster)_$(Process).out
 # Transfer files to and from compute node
 should_transfer_files = YES
 transfer_input_files = config.py, dataset.py, diffusion.py, model.py, requirements.txt, sample.py, train.py, utils.py
-transfer_output_files = mnist_diffusion
+transfer_output_files = mnist_diffusion_ddim
 #output_destination = file:///home/ageppert/single_photon_challenge/diffusion/
 #transfer_output_remaps = "mnist_diffusion = file:///home/ageppert/single_photon_challenge/diffusion/mnist_diffusion"
 when_to_transfer_output = ON_EXIT
@@ -52,8 +52,8 @@ when_to_transfer_output = ON_EXIT
 # Requirements (e.g., operating system) your job needs, what amount of
 # compute resources each job will need on the computer where it runs.
 request_cpus = 1
-request_memory = 40GB
-request_disk = 40GB
+request_memory = 10GB
+request_disk = 10GB
 
 ##########################################
 ############ GPU Requirements ############
@@ -70,7 +70,7 @@ request_disk = 40GB
 #gpus_maximum_capability = <version>
 
 # Request minimum amount of GPU memory 
-gpus_minimum_memory = 16000
+gpus_minimum_memory = 40GB
 
 # Indicate shorter/resumeable jobs, i.e., have ability to checkpoint
 #+is_resumable = true

@@ -26,7 +26,7 @@ MODEL_CONFIG = {
 }
 
 TRAIN_CONFIG = {
-    "task_name": "mnist_diffusion",
+    "task_name": "mnist_diffusion_ddim",
     "data_dir": "./data",
     "batch_size": 256,
     "num_epochs": 50,
