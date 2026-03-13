@@ -14,7 +14,7 @@ def main() -> None:
     model = load_checkpoint(model, checkpoint_path(), DEVICE)
 
     num_samples = 16
-    generated_samples = sample_ddim(
+    generated_samples = sample_ddpm(
         model=model,
         scheduler=scheduler,
         num_samples=num_samples,
@@ -29,7 +29,27 @@ def main() -> None:
         nrow=int(math.sqrt(num_samples)),
     )
 
-    print(f"Generated samples saved to {generated_samples_path()}")
+    print(f"Generated samples saved to {generated_samples_path('ddpm')}")
+
+    num_samples = 16
+    generated_samples = sample_ddim(
+        model=model,
+        scheduler=scheduler,
+        num_samples=num_samples,
+        image_size=MODEL_CONFIG["im_size"],
+        channels=MODEL_CONFIG["im_channels"],
+        device=DEVICE,
+        num_inference_steps=250,
+        eta=0.0
+    )
+
+    save_image_grid(
+        generated_samples,
+        output_path=generated_samples_path(),
+        nrow=int(math.sqrt(num_samples)),
+    )
+
+    print(f"Generated samples saved to {generated_samples_path('ddim')}")
 
 
 if __name__ == "__main__":

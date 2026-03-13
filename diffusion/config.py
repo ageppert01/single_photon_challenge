@@ -26,7 +26,7 @@ MODEL_CONFIG = {
 }
 
 TRAIN_CONFIG = {
-    "task_name": "mnist_diffusion_ddim",
+    "task_name": "mnist_diffusion",
     "data_dir": "./data",
     "batch_size": 256,
     "num_epochs": 50,
@@ -41,6 +41,6 @@ TRAIN_CONFIG = {
 def checkpoint_path() -> str:
     return f"{TRAIN_CONFIG['task_name']}/{TRAIN_CONFIG['ckpt_name']}"
 
+def generated_samples_path(sample_method="ddpm") -> str:
+    return f"{TRAIN_CONFIG['task_name']}/{sample_method}{'_'}{TRAIN_CONFIG['generated_name']}"
 
-def generated_samples_path() -> str:
-    return f"{TRAIN_CONFIG['task_name']}/{TRAIN_CONFIG['generated_name']}"
