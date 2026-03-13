@@ -7,4 +7,4 @@ python -m pip install --no-cache-dir -r requirements.txt
 
 python train.py
 
-python ddpm_sample.py
+python sample.py

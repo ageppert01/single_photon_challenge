@@ -1,0 +1,5 @@
+*.err
+*.log
+*.out
+
+*.pth
