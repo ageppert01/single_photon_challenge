@@ -6,7 +6,7 @@ from torch.optim import Adam
 from tqdm import tqdm
 
 from config import DEVICE, DIFFUSION_CONFIG, MODEL_CONFIG, TRAIN_CONFIG, checkpoint_path
-from dataset import get_mnist_dataloader
+from dataset import get_mnist_dataloader, get_single_photon_dataloader
 from diffusion import LinearNoiseScheduler
 from model import Unet
 from utils import ensure_dir, save_checkpoint, seed_everything
@@ -30,7 +30,8 @@ def train(
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{num_epochs}"):
             optimizer.zero_grad()
 
-            images = batch[0].to(device)
+            images = batch.to(device)
+
             noise = torch.randn_like(images, device=device)
             timesteps = torch.randint(0, scheduler.num_timesteps, (images.shape[0],), device=device)
 
@@ -54,10 +55,10 @@ def main() -> None:
     ensure_dir(TRAIN_CONFIG["task_name"])
 
     scheduler = LinearNoiseScheduler(**DIFFUSION_CONFIG)
-    dataloader = get_mnist_dataloader(
+
+    dataloader = get_single_photon_dataloader(
         batch_size=TRAIN_CONFIG["batch_size"],
         data_dir=TRAIN_CONFIG["data_dir"],
-        train=True,
         shuffle=True,
         num_workers=TRAIN_CONFIG["num_workers"],
     )
