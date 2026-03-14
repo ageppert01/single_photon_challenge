@@ -1,388 +1,245 @@
 from __future__ import annotations
 
-import math
-
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
-def get_time_embedding(timesteps: torch.Tensor, embedding_dim: int) -> torch.Tensor:
-    if embedding_dim % 2 != 0:
-        raise ValueError("embedding_dim must be even")
+def sinusoidal_embedding(timesteps: torch.Tensor, dim: int) -> torch.Tensor:
 
-    timesteps = timesteps.long()
-    half_dim = embedding_dim // 2
-    factor = math.log(10000) / (half_dim - 1)
-    emb = torch.exp(torch.arange(half_dim, device=timesteps.device) * -factor)
-    emb = timesteps.unsqueeze(1) * emb.unsqueeze(0)
-    return torch.cat([torch.sin(emb), torch.cos(emb)], dim=-1)
+    device = timesteps.device
+
+    half = dim // 2
+
+    emb = torch.exp(
+        torch.arange(half, device=device) * (-torch.log(torch.tensor(10000.0)) / (half - 1))
+    )
+
+    emb = timesteps[:, None] * emb[None]
+
+    emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=-1)
+
+    if dim % 2:
+        emb = F.pad(emb, (0, 1))
+
+    return emb
+
+
+class ResidualBlock(nn.Module):
+
+    def __init__(self, in_ch, out_ch, time_dim):
+
+        super().__init__()
+
+        self.conv1 = nn.Conv2d(in_ch, out_ch, 3, padding=1)
+        self.conv2 = nn.Conv2d(out_ch, out_ch, 3, padding=1)
+
+        self.time = nn.Linear(time_dim, out_ch)
+
+        self.norm1 = nn.GroupNorm(8, out_ch)
+        self.norm2 = nn.GroupNorm(8, out_ch)
+
+        if in_ch != out_ch:
+            self.skip = nn.Conv2d(in_ch, out_ch, 1)
+        else:
+            self.skip = nn.Identity()
+
+    def forward(self, x, t):
+
+        h = self.conv1(x)
+        h = self.norm1(h)
+        h = F.silu(h)
+
+        t = self.time(t)[:, :, None, None]
+        h = h + t
+
+        h = self.conv2(h)
+        h = self.norm2(h)
+        h = F.silu(h)
+
+        return h + self.skip(x)
+
+
+class AttentionBlock(nn.Module):
+
+    def __init__(self, channels, heads):
+
+        super().__init__()
+
+        self.norm = nn.GroupNorm(8, channels)
+        self.attn = nn.MultiheadAttention(channels, heads, batch_first=True)
+
+    def forward(self, x):
+
+        b, c, h, w = x.shape
+
+        y = self.norm(x)
+
+        y = y.reshape(b, c, h * w).permute(0, 2, 1)
+
+        y, _ = self.attn(y, y, y)
+
+        y = y.permute(0, 2, 1).reshape(b, c, h, w)
+
+        return x + y
 
 
 class DownBlock(nn.Module):
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        t_emb_dim: int,
-        down_sample: bool = True,
-        num_heads: int = 4,
-        num_layers: int = 1,
-    ) -> None:
+
+    def __init__(self, in_ch, out_ch, time_dim, num_layers, use_attention, heads, downsample):
+
         super().__init__()
-        self.num_layers = num_layers
-        self.down_sample = down_sample
-        self.t_emb_dim = t_emb_dim
 
-        self.resnet_conv_first = nn.ModuleList(
-            [
-                nn.Sequential(
-                    nn.GroupNorm(8, in_channels if i == 0 else out_channels),
-                    nn.SiLU(),
-                    nn.Conv2d(
-                        in_channels if i == 0 else out_channels,
-                        out_channels,
-                        kernel_size=3,
-                        stride=1,
-                        padding=1,
-                    ),
-                )
-                for i in range(num_layers)
-            ]
+        self.blocks = nn.ModuleList(
+            [ResidualBlock(in_ch if i == 0 else out_ch, out_ch, time_dim) for i in range(num_layers)]
         )
 
-        self.t_emb_layers = nn.ModuleList(
-            [
-                nn.Sequential(
-                    nn.SiLU(),
-                    nn.Linear(self.t_emb_dim, out_channels),
-                )
-                for _ in range(num_layers)
-            ]
-        )
+        self.attn = AttentionBlock(out_ch, heads) if use_attention else None
 
-        self.resnet_conv_second = nn.ModuleList(
-            [
-                nn.Sequential(
-                    nn.GroupNorm(8, out_channels),
-                    nn.SiLU(),
-                    nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1),
-                )
-                for _ in range(num_layers)
-            ]
-        )
+        self.down = nn.Conv2d(out_ch, out_ch, 4, 2, 1) if downsample else None
 
-        self.attention_norms = nn.ModuleList([nn.GroupNorm(8, out_channels) for _ in range(num_layers)])
-        self.attentions = nn.ModuleList(
-            [nn.MultiheadAttention(out_channels, num_heads, batch_first=True) for _ in range(num_layers)]
-        )
-        self.residual_input_conv = nn.ModuleList(
-            [
-                nn.Conv2d(in_channels if i == 0 else out_channels, out_channels, kernel_size=1)
-                for i in range(num_layers)
-            ]
-        )
-        self.down_sample_conv = (
-            nn.Conv2d(out_channels, out_channels, kernel_size=4, stride=2, padding=1)
-            if self.down_sample
-            else nn.Identity()
-        )
+    def forward(self, x, t):
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        t_emb = get_time_embedding(t, self.t_emb_dim)
-        out = x
+        for block in self.blocks:
+            x = block(x, t)
 
-        for i in range(self.num_layers):
-            resnet_input = out
-            out = self.resnet_conv_first[i](out)
-            out = out + self.t_emb_layers[i](t_emb)[:, :, None, None]
-            out = self.resnet_conv_second[i](out)
-            out = out + self.residual_input_conv[i](resnet_input)
+        if self.attn is not None:
+            x = self.attn(x)
 
-            batch_size, channels, height, width = out.shape
-            in_attn = out.reshape(batch_size, channels, height * width)
-            in_attn = self.attention_norms[i](in_attn)
-            in_attn = in_attn.transpose(1, 2)
-            out_attn, _ = self.attentions[i](in_attn, in_attn, in_attn)
-            out_attn = out_attn.transpose(1, 2).reshape(batch_size, channels, height, width)
-            out = out + out_attn
+        skip = x
 
-        return self.down_sample_conv(out)
+        if self.down is not None:
+            x = self.down(x)
 
-
-class MidBlock(nn.Module):
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        t_emb_dim: int,
-        num_heads: int = 4,
-        num_layers: int = 1,
-    ) -> None:
-        super().__init__()
-        self.num_layers = num_layers
-        self.t_emb_dim = t_emb_dim
-
-        self.resnet_conv_first = nn.ModuleList(
-            [
-                nn.Sequential(
-                    nn.GroupNorm(8, in_channels if i == 0 else out_channels),
-                    nn.SiLU(),
-                    nn.Conv2d(
-                        in_channels if i == 0 else out_channels,
-                        out_channels,
-                        kernel_size=3,
-                        stride=1,
-                        padding=1,
-                    ),
-                )
-                for i in range(num_layers + 1)
-            ]
-        )
-
-        self.t_emb_layers = nn.ModuleList(
-            [
-                nn.Sequential(
-                    nn.SiLU(),
-                    nn.Linear(self.t_emb_dim, out_channels),
-                )
-                for _ in range(num_layers + 1)
-            ]
-        )
-
-        self.resnet_conv_second = nn.ModuleList(
-            [
-                nn.Sequential(
-                    nn.GroupNorm(8, out_channels),
-                    nn.SiLU(),
-                    nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1),
-                )
-                for _ in range(num_layers + 1)
-            ]
-        )
-
-        self.attention_norms = nn.ModuleList([nn.GroupNorm(8, out_channels) for _ in range(num_layers)])
-        self.attentions = nn.ModuleList(
-            [nn.MultiheadAttention(out_channels, num_heads, batch_first=True) for _ in range(num_layers)]
-        )
-        self.residual_input_conv = nn.ModuleList(
-            [
-                nn.Conv2d(in_channels if i == 0 else out_channels, out_channels, kernel_size=1)
-                for i in range(num_layers + 1)
-            ]
-        )
-
-    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        t_emb = get_time_embedding(t, self.t_emb_dim)
-        out = x
-
-        resnet_input = out
-        out = self.resnet_conv_first[0](out)
-        out = out + self.t_emb_layers[0](t_emb)[:, :, None, None]
-        out = self.resnet_conv_second[0](out)
-        out = out + self.residual_input_conv[0](resnet_input)
-
-        for i in range(self.num_layers):
-            batch_size, channels, height, width = out.shape
-            in_attn = out.reshape(batch_size, channels, height * width)
-            in_attn = self.attention_norms[i](in_attn)
-            in_attn = in_attn.transpose(1, 2)
-            out_attn, _ = self.attentions[i](in_attn, in_attn, in_attn)
-            out_attn = out_attn.transpose(1, 2).reshape(batch_size, channels, height, width)
-            out = out + out_attn
-
-            resnet_input = out
-            out = self.resnet_conv_first[i + 1](out)
-            out = out + self.t_emb_layers[i + 1](t_emb)[:, :, None, None]
-            out = self.resnet_conv_second[i + 1](out)
-            out = out + self.residual_input_conv[i + 1](resnet_input)
-
-        return out
+        return x, skip
 
 
 class UpBlock(nn.Module):
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        t_emb_dim: int,
-        up_sample: bool = True,
-        num_heads: int = 4,
-        num_layers: int = 1,
-    ) -> None:
+
+    def __init__(self, in_ch, out_ch, time_dim, num_layers, use_attention, heads):
+
         super().__init__()
-        self.num_layers = num_layers
-        self.up_sample = up_sample
-        self.t_emb_dim = t_emb_dim
 
-        self.resnet_conv_first = nn.ModuleList(
-            [
-                nn.Sequential(
-                    nn.GroupNorm(8, in_channels if i == 0 else out_channels),
-                    nn.SiLU(),
-                    nn.Conv2d(
-                        in_channels if i == 0 else out_channels,
-                        out_channels,
-                        kernel_size=3,
-                        stride=1,
-                        padding=1,
-                    ),
-                )
-                for i in range(num_layers)
-            ]
+        self.blocks = nn.ModuleList(
+            [ResidualBlock(in_ch if i == 0 else out_ch, out_ch, time_dim) for i in range(num_layers)]
         )
 
-        self.t_emb_layers = nn.ModuleList(
-            [
-                nn.Sequential(
-                    nn.SiLU(),
-                    nn.Linear(self.t_emb_dim, out_channels),
-                )
-                for _ in range(num_layers)
-            ]
-        )
+        self.attn = AttentionBlock(out_ch, heads) if use_attention else None
 
-        self.resnet_conv_second = nn.ModuleList(
-            [
-                nn.Sequential(
-                    nn.GroupNorm(8, out_channels),
-                    nn.SiLU(),
-                    nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1),
-                )
-                for _ in range(num_layers)
-            ]
-        )
+    def forward(self, x, skip, t):
 
-        self.attention_norms = nn.ModuleList([nn.GroupNorm(8, out_channels) for _ in range(num_layers)])
-        self.attentions = nn.ModuleList(
-            [nn.MultiheadAttention(out_channels, num_heads, batch_first=True) for _ in range(num_layers)]
-        )
-        self.residual_input_conv = nn.ModuleList(
-            [
-                nn.Conv2d(in_channels if i == 0 else out_channels, out_channels, kernel_size=1)
-                for i in range(num_layers)
-            ]
-        )
-        self.up_sample_conv = (
-            nn.ConvTranspose2d(in_channels // 2, in_channels // 2, kernel_size=4, stride=2, padding=1)
-            if self.up_sample
-            else nn.Identity()
-        )
+        x = torch.cat([x, skip], dim=1)
 
-    def forward(self, x: torch.Tensor, out_down: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        t_emb = get_time_embedding(t, self.t_emb_dim)
-        x = self.up_sample_conv(x)
-        x = torch.cat([x, out_down], dim=1)
+        for block in self.blocks:
+            x = block(x, t)
 
-        out = x
-        for i in range(self.num_layers):
-            resnet_input = out
-            out = self.resnet_conv_first[i](out)
-            out = out + self.t_emb_layers[i](t_emb)[:, :, None, None]
-            out = self.resnet_conv_second[i](out)
-            out = out + self.residual_input_conv[i](resnet_input)
+        if self.attn is not None:
+            x = self.attn(x)
 
-            batch_size, channels, height, width = out.shape
-            in_attn = out.reshape(batch_size, channels, height * width)
-            in_attn = self.attention_norms[i](in_attn)
-            in_attn = in_attn.transpose(1, 2)
-            out_attn, _ = self.attentions[i](in_attn, in_attn, in_attn)
-            out_attn = out_attn.transpose(1, 2).reshape(batch_size, channels, height, width)
-            out = out + out_attn
-
-        return out
+        return x
 
 
 class Unet(nn.Module):
-    def __init__(self, model_config: dict) -> None:
+
+    def __init__(self, config):
+
         super().__init__()
 
-        im_channels = model_config["im_channels"]
-        self.down_channels = model_config["down_channels"]
-        self.mid_channels = model_config["mid_channels"]
-        self.t_emb_dim = model_config["time_emb_dim"]
-        self.down_sample = model_config["down_sample"]
-        self.num_down_layers = model_config["num_down_layers"]
-        self.num_mid_layers = model_config["num_mid_layers"]
-        self.num_up_layers = model_config["num_up_layers"]
-        self.num_heads = model_config.get("num_heads", 4)
+        self.config = config
 
-        if self.mid_channels[0] != self.down_channels[-1]:
-            raise ValueError("mid_channels[0] must match down_channels[-1]")
-        if self.mid_channels[-1] != self.down_channels[-2]:
-            raise ValueError("mid_channels[-1] must match down_channels[-2]")
-        if len(self.down_sample) != len(self.down_channels) - 1:
-            raise ValueError("len(down_sample) must equal len(down_channels) - 1")
+        self.time_dim = config["time_emb_dim"]
 
-        self.t_proj = nn.Sequential(
-            nn.Linear(self.t_emb_dim, self.t_emb_dim),
+        self.time_mlp = nn.Sequential(
+            nn.Linear(self.time_dim, self.time_dim),
             nn.SiLU(),
-            nn.Linear(self.t_emb_dim, self.t_emb_dim),
+            nn.Linear(self.time_dim, self.time_dim),
         )
 
-        self.conv_in = nn.Conv2d(im_channels, self.down_channels[0], kernel_size=3, padding=1)
+        self.init = nn.Conv2d(config["im_channels"], config["down_channels"][0], 3, padding=1)
 
-        self.downs = nn.ModuleList(
-            [
+        self.downs = nn.ModuleList()
+
+        for i in range(len(config["down_channels"]) - 1):
+
+            self.downs.append(
                 DownBlock(
-                    self.down_channels[i],
-                    self.down_channels[i + 1],
-                    self.t_emb_dim,
-                    down_sample=self.down_sample[i],
-                    num_heads=self.num_heads,
-                    num_layers=self.num_down_layers,
+                    config["down_channels"][i],
+                    config["down_channels"][i + 1],
+                    self.time_dim,
+                    config["num_down_layers"],
+                    config["down_attention"][i],
+                    config["num_heads"],
+                    config["down_sample"][i],
                 )
-                for i in range(len(self.down_channels) - 1)
-            ]
-        )
+            )
 
-        self.mids = nn.ModuleList(
-            [
-                MidBlock(
-                    self.mid_channels[i],
-                    self.mid_channels[i + 1],
-                    self.t_emb_dim,
-                    num_heads=self.num_heads,
-                    num_layers=self.num_mid_layers,
+        mid_ch = config["mid_channels"][0]
+
+        self.mid_blocks = nn.ModuleList()
+
+        for i in range(config["num_mid_layers"]):
+
+            self.mid_blocks.append(
+                ResidualBlock(
+                    mid_ch if i == 0 else config["mid_channels"][i],
+                    config["mid_channels"][i + 1],
+                    self.time_dim,
                 )
-                for i in range(len(self.mid_channels) - 1)
-            ]
-        )
+            )
 
-        self.ups = nn.ModuleList(
-            [
+        self.mid_attn = AttentionBlock(config["mid_channels"][-1], config["num_heads"]) \
+            if config["mid_attention"] else None
+
+        self.ups = nn.ModuleList()
+
+        rev = list(reversed(config["down_channels"]))
+
+        for i in range(len(rev) - 1):
+
+            self.ups.append(
                 UpBlock(
-                    self.down_channels[i] * 2,
-                    self.down_channels[i - 1] if i != 0 else 16,
-                    self.t_emb_dim,
-                    up_sample=self.down_sample[i],
-                    num_heads=self.num_heads,
-                    num_layers=self.num_up_layers,
+                    rev[i] + rev[i + 1],
+                    rev[i + 1],
+                    self.time_dim,
+                    config["num_up_layers"],
+                    config["up_attention"][i],
+                    config["num_heads"],
                 )
-                for i in reversed(range(len(self.down_channels) - 1))
+            )
+
+        self.upsample = nn.ModuleList(
+            [
+                nn.ConvTranspose2d(rev[i + 1], rev[i + 1], 4, 2, 1)
+                if config["down_sample"][-(i + 1)]
+                else None
+                for i in range(len(rev) - 1)
             ]
         )
 
-        self.norm_out = nn.GroupNorm(8, 16)
-        self.conv_out = nn.Conv2d(16, im_channels, kernel_size=3, padding=1)
+        self.final = nn.Conv2d(config["down_channels"][0], config["im_channels"], 1)
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        t = torch.as_tensor(t, device=x.device).long().view(-1)
-        t_emb = self.t_proj(get_time_embedding(t, self.t_emb_dim))
+    def forward(self, x, t):
 
-        out = self.conv_in(x)
+        t = sinusoidal_embedding(t, self.time_dim)
+        t = self.time_mlp(t)
 
-        down_outs = []
-        for down in self.downs:
-            down_outs.append(out)
-            out = down(out, t)
+        x = self.init(x)
 
-        for mid in self.mids:
-            out = mid(out, t)
+        skips = []
 
-        for up in self.ups:
-            out = up(out, down_outs.pop(), t)
+        for block in self.downs:
+            x, skip = block(x, t)
+            skips.append(skip)
 
-        out = self.norm_out(out)
-        out = nn.SiLU()(out)
-        out = self.conv_out(out)
-        return out
+        for block in self.mid_blocks:
+            x = block(x, t)
+
+        if self.mid_attn is not None:
+            x = self.mid_attn(x)
+
+        for block, up, skip in zip(self.ups, self.upsample, reversed(skips)):
+            if up is not None:
+                x = up(x)
+            x = block(x, skip, t)
+
+        return self.final(x)

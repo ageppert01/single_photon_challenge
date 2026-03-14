@@ -3,6 +3,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 from torch.optim import Adam
+from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
 
 from config import DEVICE, DIFFUSION_CONFIG, MODEL_CONFIG, TRAIN_CONFIG, checkpoint_path
@@ -25,10 +26,16 @@ def train(
 
     model.train()
 
+    scaler = GradScaler(enabled=TRAIN_CONFIG["use_amp"])
+    accumulation = TRAIN_CONFIG["gradient_accumulation"]
+
     for epoch in range(num_epochs):
+
         epoch_loss = 0.0
 
-        for images in tqdm(dataloader, desc=f"Epoch {epoch+1}/{num_epochs}"):
+        optimizer.zero_grad()
+
+        for step, images in enumerate(tqdm(dataloader)):
 
             images = images.to(device)
 
@@ -41,20 +48,28 @@ def train(
                 device=device,
             )
 
-            noisy_images = scheduler.add_noise(images, noise, timesteps)
+            with autocast(enabled=TRAIN_CONFIG["use_amp"]):
 
-            pred_noise = model(noisy_images, timesteps)
+                noisy_images = scheduler.add_noise(images, noise, timesteps)
 
-            loss = criterion(pred_noise, noise)
+                pred_noise = model(noisy_images, timesteps)
 
-            optimizer.zero_grad()
-            loss.backward()
+                loss = criterion(pred_noise, noise)
+                loss = loss / accumulation
 
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            scaler.scale(loss).backward()
 
-            optimizer.step()
+            if (step + 1) % accumulation == 0:
 
-            epoch_loss += loss.item()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+
+                scaler.step(optimizer)
+                scaler.update()
+
+                optimizer.zero_grad()
+
+            epoch_loss += loss.item() * accumulation
 
         epoch_loss /= len(dataloader)
 
@@ -64,6 +79,7 @@ def train(
 
 
 def main() -> None:
+
     seed_everything(TRAIN_CONFIG["seed"])
 
     ensure_dir(TRAIN_CONFIG["task_name"])

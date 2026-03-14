@@ -10,7 +10,7 @@
 # Example: quay.io in docker://quay.io/user/repo:tag
 # For more info: https://chtc.cs.wisc.edu/uw-research-computing/docker-jobs
 # For more info: https://chtc.cs.wisc.edu/uw-research-computing/apptainer-htc
-container_image = docker://pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime
+container_image = docker://nvcr.io/nvidia/pytorch:23.08-py3
 universe = container
 
 ##########################################
@@ -40,10 +40,10 @@ output = $(JobName)_$(Cluster)_$(Process).out
 
 # Transfer files to and from compute node
 should_transfer_files = YES
-transfer_input_files = config.py, dataset.py, diffusion.py, model.py, requirements.txt, sample.py, train.py, utils.py
-transfer_output_files = mnist_diffusion_ddim
-#output_destination = file:///home/ageppert/single_photon_challenge/diffusion/
-#transfer_output_remaps = "mnist_diffusion = file:///home/ageppert/single_photon_challenge/diffusion/mnist_diffusion"
+transfer_input_files = train.py, sample.py, model.py, diffusion.py, dataset.py, utils.py, config.py, requirements.txt
+transfer_output_files = single_photon_ground_truth_diffusion
+#output_destination = 
+#transfer_output_remaps = 
 when_to_transfer_output = ON_EXIT
 
 ##########################################
@@ -51,9 +51,9 @@ when_to_transfer_output = ON_EXIT
 
 # Requirements (e.g., operating system) your job needs, what amount of
 # compute resources each job will need on the computer where it runs.
-request_cpus = 1
-request_memory = 10GB
-request_disk = 10GB
+request_cpus = 2
+request_memory = 40GB
+request_disk = 40GB
 
 ##########################################
 ############ GPU Requirements ############

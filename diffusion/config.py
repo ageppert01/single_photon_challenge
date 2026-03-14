@@ -16,22 +16,28 @@ DIFFUSION_CONFIG = {
 MODEL_CONFIG = {
     "im_channels": 3,
     "im_size": 800,
-    "down_channels": [32, 64, 128, 256],
-    "mid_channels": [256, 256, 128],
-    "down_sample": [True, True, False],
+
+    "down_channels": [32, 64, 128, 256, 512],
+    "mid_channels": [512, 512, 256],
+
+    "down_sample": [True, True, True, True],
+    "down_attention": [False, False, False, True],
+    "mid_attention": True,
+    "up_attention": [True, False, False, False],
+
     "time_emb_dim": 128,
-    "num_down_layers": 4,
-    "num_mid_layers": 4,
-    "num_up_layers": 4,
     "num_heads": 4,
+
+    "num_down_layers": 2,
+    "num_mid_layers": 2,
+    "num_up_layers": 2,
 }
 
 
 TRAIN_CONFIG = {
     "task_name": "single_photon_ground_truth_diffusion",
 
-    # dataset configuration
-    "dataset_source": "hf",  # "local" or "hf"
+    "dataset_source": "hf",
     "local_dataset_dir": "./single_photon_sample/train",
     "hf_dataset_repo": "ageppert/single_photon_challenge_sample_dataset",
     "hf_dataset_revision": "main",
@@ -39,11 +45,14 @@ TRAIN_CONFIG = {
     "batch_size": 1,
     "num_epochs": 50,
     "lr": 1e-4,
-    "num_workers": 0,
+    "num_workers": 2,
+
+    "gradient_accumulation": 2,
+    "use_amp": True,
 
     "ckpt_name": "ddpm_ckpt.pth",
     "generated_name": "generated_samples.png",
-    "num_generated_samples": 4,
+    "num_generated_samples": 1,
     "seed": 42,
 }
 

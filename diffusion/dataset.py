@@ -7,8 +7,6 @@ import torch
 from PIL import Image
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
-import torchvision.transforms as transforms
-
 from huggingface_hub import snapshot_download
 
 
@@ -18,12 +16,7 @@ def resolve_dataset_root(
     hf_repo: Optional[str],
     hf_revision: Optional[str],
 ) -> Path:
-    """
-    Resolve the dataset root directory.
 
-    - local: use the provided local directory
-    - hf: download the dataset snapshot from Hugging Face
-    """
     if source == "local":
         if local_dir is None:
             raise ValueError("local dataset source requires a directory path")
@@ -58,19 +51,10 @@ class SinglePhotonGroundTruthDataset(Dataset[Tensor]):
 
     def __init__(self, root_dir: Path) -> None:
         self.root_dir = root_dir
-
-        # collect all PNG files recursively
         self.image_paths = sorted(self.root_dir.rglob("*.png"))
 
         if not self.image_paths:
             raise RuntimeError(f"No PNG files found in dataset: {self.root_dir}")
-
-        self.transform = transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-            ]
-        )
 
     def __len__(self) -> int:
         return len(self.image_paths)
@@ -80,9 +64,16 @@ class SinglePhotonGroundTruthDataset(Dataset[Tensor]):
 
         with Image.open(path) as img:
             img = img.convert("RGB")
-            img = self.transform(img)
 
-        return img
+            tensor = torch.from_numpy(
+                (torch.ByteTensor(torch.ByteStorage.from_buffer(img.tobytes()))
+                 .view(img.size[1], img.size[0], 3)
+                 .permute(2, 0, 1)
+                 .float())
+            ) / 255.0
+
+        tensor = tensor * 2 - 1
+        return tensor
 
 
 def get_single_photon_dataloader(
@@ -99,51 +90,10 @@ def get_single_photon_dataloader(
 
     dataset = SinglePhotonGroundTruthDataset(dataset_root)
 
-    pin_memory = torch.cuda.is_available()
-
     return DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
-        pin_memory=pin_memory,
-    )
-
-
-
-###################################################################################
-# Legacy MNIST code for unconditional DDPM-style diffusion modeling
-
-def mnist_transform() -> transforms.Compose:
-    return transforms.Compose(
-        [
-            transforms.ToTensor(),
-            transforms.Normalize((0.5,), (0.5,)),
-        ]
-    )
-
-
-def get_mnist_dataset(data_dir: str = "./data", train: bool = True) -> torchvision.datasets.MNIST:
-    return torchvision.datasets.MNIST(
-        root=data_dir,
-        train=train,
-        download=True,
-        transform=mnist_transform(),
-    )
-
-
-def get_mnist_dataloader(
-    batch_size: int,
-    data_dir: str = "./data",
-    train: bool = True,
-    shuffle: bool = True,
-    num_workers: int = 4,
-) -> DataLoader:
-    dataset = get_mnist_dataset(data_dir=data_dir, train=train)
-    return DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=shuffle if train else False,
-        num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=torch.cuda.is_available(),
     )
