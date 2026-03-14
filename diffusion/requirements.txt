@@ -3,4 +3,4 @@ torchvision
 tqdm
 numpy
 Pillow
-PIL
+huggingface_hub

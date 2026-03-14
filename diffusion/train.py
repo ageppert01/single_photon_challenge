@@ -6,7 +6,7 @@ from torch.optim import Adam
 from tqdm import tqdm
 
 from config import DEVICE, DIFFUSION_CONFIG, MODEL_CONFIG, TRAIN_CONFIG, checkpoint_path
-from dataset import get_mnist_dataloader, get_single_photon_dataloader
+from dataset import get_single_photon_dataloader
 from diffusion import LinearNoiseScheduler
 from model import Unet
 from utils import ensure_dir, save_checkpoint, seed_everything
@@ -14,7 +14,7 @@ from utils import ensure_dir, save_checkpoint, seed_everything
 
 def train(
     model: torch.nn.Module,
-    train_loader: torch.utils.data.DataLoader,
+    dataloader: torch.utils.data.DataLoader,
     scheduler: LinearNoiseScheduler,
     optimizer: torch.optim.Optimizer,
     criterion: nn.Module,
@@ -22,54 +22,73 @@ def train(
     device: torch.device,
     save_path: str,
 ) -> None:
+
     model.train()
 
     for epoch in range(num_epochs):
         epoch_loss = 0.0
 
-        for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{num_epochs}"):
-            optimizer.zero_grad()
+        for images in tqdm(dataloader, desc=f"Epoch {epoch+1}/{num_epochs}"):
 
-            images = batch.to(device)
+            images = images.to(device)
 
-            noise = torch.randn_like(images, device=device)
-            timesteps = torch.randint(0, scheduler.num_timesteps, (images.shape[0],), device=device)
+            noise = torch.randn_like(images)
+
+            timesteps = torch.randint(
+                0,
+                scheduler.num_timesteps,
+                (images.shape[0],),
+                device=device,
+            )
 
             noisy_images = scheduler.add_noise(images, noise, timesteps)
-            predicted_noise = model(noisy_images, timesteps)
 
-            loss = criterion(predicted_noise, noise)
+            pred_noise = model(noisy_images, timesteps)
+
+            loss = criterion(pred_noise, noise)
+
+            optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+
             optimizer.step()
 
             epoch_loss += loss.item()
 
-        avg_loss = epoch_loss / len(train_loader)
-        print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}")
+        epoch_loss /= len(dataloader)
+
+        print(f"Epoch {epoch+1} | Loss {epoch_loss:.4f}")
+
         save_checkpoint(model, save_path)
 
 
 def main() -> None:
     seed_everything(TRAIN_CONFIG["seed"])
+
     ensure_dir(TRAIN_CONFIG["task_name"])
 
     scheduler = LinearNoiseScheduler(**DIFFUSION_CONFIG)
 
     dataloader = get_single_photon_dataloader(
         batch_size=TRAIN_CONFIG["batch_size"],
-        data_dir=TRAIN_CONFIG["data_dir"],
+        source=TRAIN_CONFIG["dataset_source"],
+        local_dir=TRAIN_CONFIG["local_dataset_dir"],
+        hf_repo=TRAIN_CONFIG["hf_dataset_repo"],
+        hf_revision=TRAIN_CONFIG["hf_dataset_revision"],
         shuffle=True,
         num_workers=TRAIN_CONFIG["num_workers"],
     )
 
     model = Unet(MODEL_CONFIG).to(DEVICE)
+
     optimizer = Adam(model.parameters(), lr=TRAIN_CONFIG["lr"])
+
     criterion = nn.MSELoss()
 
     train(
         model=model,
-        train_loader=dataloader,
+        dataloader=dataloader,
         scheduler=scheduler,
         optimizer=optimizer,
         criterion=criterion,
