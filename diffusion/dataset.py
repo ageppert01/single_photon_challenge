@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 import torch
 from PIL import Image
 from torch import Tensor
@@ -64,13 +65,8 @@ class SinglePhotonGroundTruthDataset(Dataset[Tensor]):
 
         with Image.open(path) as img:
             img = img.convert("RGB")
-
-            tensor = torch.from_numpy(
-                (torch.ByteTensor(torch.ByteStorage.from_buffer(img.tobytes()))
-                 .view(img.size[1], img.size[0], 3)
-                 .permute(2, 0, 1)
-                 .float())
-            ) / 255.0
+            arr = np.array(img, dtype=np.float32) / 255.0
+            tensor = torch.from_numpy(arr).permute(2, 0, 1)
 
         tensor = tensor * 2 - 1
         return tensor
