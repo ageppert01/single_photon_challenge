@@ -9,7 +9,7 @@ from tqdm import tqdm
 from config import DEVICE, DIFFUSION_CONFIG, MODEL_CONFIG, TRAIN_CONFIG, checkpoint_path
 from dataset import get_single_photon_dataloader
 from diffusion import LinearNoiseScheduler
-from model import Unet
+from model import UNet
 from utils import ensure_dir, save_checkpoint, seed_everything
 
 
@@ -96,7 +96,7 @@ def main() -> None:
         num_workers=TRAIN_CONFIG["num_workers"],
     )
 
-    model = Unet(MODEL_CONFIG).to(DEVICE)
+    model = UNet(MODEL_CONFIG).to(DEVICE)
 
     optimizer = Adam(model.parameters(), lr=TRAIN_CONFIG["lr"])
 

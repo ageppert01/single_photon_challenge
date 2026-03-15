@@ -12,7 +12,7 @@ from config import (
 )
 
 from diffusion import LinearNoiseScheduler, sample_ddpm, sample_ddim
-from model import Unet
+from model import UNet
 from utils import load_checkpoint, save_image_grid
 
 
@@ -20,7 +20,7 @@ def main() -> None:
 
     scheduler = LinearNoiseScheduler(**DIFFUSION_CONFIG)
 
-    model = Unet(MODEL_CONFIG)
+    model = UNet(MODEL_CONFIG)
 
     model = load_checkpoint(model, checkpoint_path(), DEVICE)
 
