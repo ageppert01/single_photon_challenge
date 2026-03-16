@@ -130,7 +130,7 @@ class UNet(nn.Module):
             nn.Linear(t_emb_dim * 4, t_emb_dim),
         )
 
-        # Down blocks
+        # Down path
         self.downs = nn.ModuleList()
 
         for i in range(len(down_channels) - 1):
@@ -155,31 +155,32 @@ class UNet(nn.Module):
                 )
             )
 
-        # Single mid attention (boolean flag)
         self.mid_attn = AttentionBlock(mid_channels[-1]) if mid_attn else None
 
         # Decoder
         self.upsamples = nn.ModuleList()
         self.ups = nn.ModuleList()
 
-        rev_down = list(reversed(down_channels))
+        skip_channels = list(reversed(down_channels[1:]))
         current_ch = mid_channels[-1]
 
-        for i, skip_ch in enumerate(rev_down[1:]):
+        for i, skip_ch in enumerate(skip_channels):
 
             self.upsamples.append(
                 nn.ConvTranspose2d(
                     current_ch,
-                    skip_ch,
+                    current_ch,
                     kernel_size=4,
                     stride=2,
                     padding=1,
                 )
             )
 
+            concat_ch = current_ch + skip_ch
+
             self.ups.append(
                 UpBlock(
-                    skip_ch + skip_ch,
+                    concat_ch,
                     skip_ch,
                     t_emb_dim,
                     use_attn=up_attn[i],
