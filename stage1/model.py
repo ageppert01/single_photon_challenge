@@ -11,6 +11,7 @@ from typing import Iterator, Optional, Tuple
 
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 
 
 class ConvLSTMCell(nn.Module):
@@ -154,9 +155,12 @@ class Stage1RNN(nn.Module):
         chunk_iter: Iterator[torch.Tensor],
         h: Optional[torch.Tensor] = None,
         c: Optional[torch.Tensor] = None,
+        use_checkpointing: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
         """
         Run ConvLSTM over an iterator of chunks. Each chunk (T, C, H, W) or (B, T, C, H, W).
+        When use_checkpointing=True and model is training, recomputes each chunk in backward
+        to save GPU memory (avoids storing activations for all 1024 steps).
 
         Returns:
             final_h: (B or 1, C_hid, H, W)
@@ -166,7 +170,12 @@ class Stage1RNN(nn.Module):
         for chunk in chunk_iter:
             if chunk.dim() == 4:
                 chunk = chunk.unsqueeze(0)  # (1, T, C, H, W)
-            h, c, _ = self.conv_lstm(chunk, h, c)
+            if use_checkpointing and self.training:
+                h, c, _ = checkpoint(
+                    self.conv_lstm, chunk, h, c, use_reentrant=False
+                )
+            else:
+                h, c, _ = self.conv_lstm(chunk, h, c)
         decoded = self.decoder(h) if self.decoder is not None else None
         return h, c, decoded
 

@@ -31,6 +31,7 @@ def parse_args():
     p.add_argument("--out_dir", type=str, default="stage1_checkpoints", help="Where to save ckpts")
     p.add_argument("--device", type=str, default=None)
     p.add_argument("--max_samples", type=int, default=None, help="Cap samples per epoch (for debugging)")
+    p.add_argument("--no_checkpointing", action="store_true", help="Disable gradient checkpointing (uses more GPU memory)")
     return p.parse_args()
 
 
@@ -43,6 +44,7 @@ def train_epoch(
     scale: float,
     chunk_size: int,
     max_samples: int | None,
+    use_checkpointing: bool = True,
 ) -> float:
     total_loss = 0.0
     n = 0
@@ -53,10 +55,14 @@ def train_epoch(
             chunk_iter, gt_full, gt_ds = PhotonCubeDataset.load_sample(
                 npy_path, gt_path, scale=scale, chunk_size=chunk_size, device=device
             )
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
             optimizer.zero_grad()
             model.train()
             gt_ds_batch = gt_ds.to(device).unsqueeze(0)
-            h, c, decoded = model.forward_chunked(chunk_iter, h=None, c=None)
+            h, c, decoded = model.forward_chunked(
+                chunk_iter, h=None, c=None, use_checkpointing=use_checkpointing
+            )
             if decoded is None:
                 raise RuntimeError("Model has no decoder")
             loss = criterion(decoded, gt_ds_batch)
@@ -101,6 +107,7 @@ def main():
         avg_loss = train_epoch(
             model, loader, optimizer, criterion, device,
             scale=args.scale, chunk_size=args.chunk_size, max_samples=args.max_samples,
+            use_checkpointing=not args.no_checkpointing,
         )
         print(f"Epoch {ep+1}/{args.epochs}  loss={avg_loss:.6f}")
         ckpt_path = out_dir / f"stage1_epoch{ep+1}.pt"
