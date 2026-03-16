@@ -1,7 +1,6 @@
 import math
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class SinusoidalTimeEmbedding(nn.Module):
@@ -15,8 +14,8 @@ class SinusoidalTimeEmbedding(nn.Module):
 
         emb = torch.exp(torch.arange(half_dim, device=t.device) * -emb_scale)
         emb = t[:, None] * emb[None, :]
-
         emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
+
         return emb
 
 
@@ -70,7 +69,6 @@ class AttentionBlock(nn.Module):
         attn = torch.softmax(torch.bmm(q.transpose(1, 2), k) * scale, dim=-1)
 
         out = torch.bmm(v, attn.transpose(1, 2))
-
         out = self.proj(out).view(b, c, h, w)
 
         return x + out
@@ -149,21 +147,18 @@ class UNet(nn.Module):
         self.mid = nn.ModuleList()
 
         for i in range(len(mid_channels) - 1):
-            block = ResidualBlock(
-                mid_channels[i],
-                mid_channels[i + 1],
-                t_emb_dim,
+            self.mid.append(
+                ResidualBlock(
+                    mid_channels[i],
+                    mid_channels[i + 1],
+                    t_emb_dim,
+                )
             )
 
-            if mid_attn[i]:
-                block = nn.Sequential(
-                    block,
-                    AttentionBlock(mid_channels[i + 1]),
-                )
+        # Single mid attention (boolean flag)
+        self.mid_attn = AttentionBlock(mid_channels[-1]) if mid_attn else None
 
-            self.mid.append(block)
-
-        # Decoder with correct channel bookkeeping
+        # Decoder
         self.upsamples = nn.ModuleList()
         self.ups = nn.ModuleList()
 
@@ -208,11 +203,10 @@ class UNet(nn.Module):
             skips.append(skip)
 
         for mid in self.mid:
-            if isinstance(mid, nn.Sequential):
-                x = mid[0](x, t_emb)
-                x = mid[1](x)
-            else:
-                x = mid(x, t_emb)
+            x = mid(x, t_emb)
+
+        if self.mid_attn is not None:
+            x = self.mid_attn(x)
 
         for upsample, up in zip(self.upsamples, self.ups):
             skip = skips.pop()
