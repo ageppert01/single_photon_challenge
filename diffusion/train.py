@@ -71,6 +71,15 @@ def train(
 
             epoch_loss += loss.item() * accumulation
 
+        if len(dataloader) % accumulation != 0:
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+
+            scaler.step(optimizer)
+            scaler.update()
+
+            optimizer.zero_grad()
+
         epoch_loss /= len(dataloader)
 
         print(f"Epoch {epoch+1} | Loss {epoch_loss:.4f}")

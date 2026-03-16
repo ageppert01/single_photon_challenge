@@ -40,7 +40,7 @@ def load_checkpoint(model: torch.nn.Module, path: str, device: torch.device):
 
 def save_image_grid(images: torch.Tensor, output_path: str, nrow: int) -> None:
 
-    images = (images.clamp(-1, 1) + 1) / 2
+    images = images.clamp(0, 1)
     images = (images * 255).byte().cpu()
 
     b, c, h, w = images.shape
