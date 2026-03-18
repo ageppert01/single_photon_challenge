@@ -41,22 +41,6 @@ def main() -> None:
         nrow=max(1, int(math.sqrt(num_samples))),
     )
 
-    images = sample_ddim(
-        model,
-        scheduler,
-        num_samples,
-        MODEL_CONFIG["im_size"],
-        MODEL_CONFIG["im_channels"],
-        DEVICE,
-        num_inference_steps=250,
-    )
-
-    save_image_grid(
-        images,
-        generated_samples_path("ddim"),
-        nrow=max(1, int(math.sqrt(num_samples))),
-    )
-
 
 if __name__ == "__main__":
     main()

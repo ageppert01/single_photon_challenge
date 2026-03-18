@@ -43,7 +43,7 @@ TRAIN_CONFIG = {
     "hf_dataset_revision": "main",
 
     "batch_size": 1,
-    "num_epochs": 50,
+    "num_epochs": 500,
     "lr": 1e-4,
     "num_workers": 2,
 

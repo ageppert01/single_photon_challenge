@@ -114,7 +114,7 @@ def sample_ddim(
     image_size: int,
     channels: int,
     device: torch.device,
-    num_inference_steps: int = 50,
+    num_inference_steps: int = 250,
     eta: float = 0.0
 ) -> torch.Tensor:
     model.eval()
