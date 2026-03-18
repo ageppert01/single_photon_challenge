@@ -4,3 +4,4 @@ tqdm
 numpy
 Pillow
 huggingface_hub
+visionsim

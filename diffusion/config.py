@@ -12,6 +12,13 @@ DIFFUSION_CONFIG = {
     "device": DEVICE,
 }
 
+PHOTONCUBE_PREPROCESS_CONFIG = {
+    "num_frames": 16,
+    "average": False,
+    "invert_response": True,
+    "invert_response_factor": 0.5,
+}
+
 
 MODEL_CONFIG = {
     "im_channels": 3,
