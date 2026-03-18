@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from visionsim.emulate.spc import spc_avg_to_rgb
+#from visionsim.emulate.spc import spc_avg_to_rgb
 
 
 def load_photoncube(path: str) -> np.ndarray:
@@ -33,7 +33,7 @@ def invert_response(
     factor: float = 0.5,
 ) -> np.ndarray:
     # VisionSIM response inversion
-    return spc_avg_to_rgb(image, factor=factor)
+    return False #spc_avg_to_rgb(image, factor=factor)
 
 
 def preprocess_photoncube(
@@ -49,8 +49,8 @@ def preprocess_photoncube(
         average=average,
     )
 
-    if invert:
-        image = invert_response(image, factor=invert_factor)
+    #if invert:
+    #    image = invert_response(image, factor=invert_factor)
 
     return image
 

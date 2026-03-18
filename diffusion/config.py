@@ -64,6 +64,28 @@ TRAIN_CONFIG = {
 }
 
 
+DDRM_CONFIG = {
+    "observation_sigma": 0.1,
+    "num_steps": 1000,
+    "output_dir": f"{TRAIN_CONFIG['task_name']}/ddrm_restoration"
+}
+
+RESTORATION_DATA_CONFIG = {
+    "dataset_source": TRAIN_CONFIG["dataset_source"],
+    "dataset_local_dir": TRAIN_CONFIG["local_dataset_dir"],
+    "dataset_hf_repo": TRAIN_CONFIG["hf_dataset_repo"],
+    "dataset_hf_revision": TRAIN_CONFIG["hf_dataset_revision"],
+
+    "num_frames": 16,
+    "average": False,
+    "invert": True,
+    "invert_factor": 0.5,
+
+    "batch_size": 1,
+    "num_workers": 4,
+}
+
+
 def checkpoint_path() -> str:
     return f"{TRAIN_CONFIG['task_name']}/{TRAIN_CONFIG['ckpt_name']}"
 

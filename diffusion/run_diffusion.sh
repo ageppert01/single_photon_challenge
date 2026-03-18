@@ -20,14 +20,19 @@ echo "Installing Python dependencies"
 python -m pip install --no-cache-dir -r requirements.txt
 
 echo "===== START TRAINING ====="
-python train.py
+#python train.py
 
 echo "===== TRAINING COMPLETE ====="
 
 echo "===== START SAMPLING ====="
-python sample.py
+#python sample.py
 
 echo "===== SAMPLING COMPLETE ====="
+
+echo "===== START RESTORATION ====="
+python sample_ddrm.py
+
+echo "===== RESTORATION COMPLETE ====="
 
 echo "===== JOB FINISHED ====="
 date

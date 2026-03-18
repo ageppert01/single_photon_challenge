@@ -40,7 +40,7 @@ output = $(JobName)_$(Cluster)_$(Process).out
 
 # Transfer files to and from compute node
 should_transfer_files = YES
-transfer_input_files = train.py, sample.py, model.py, diffusion.py, dataset.py, utils.py, config.py, requirements.txt
+transfer_input_files = train.py, sample.py, model.py, diffusion.py, dataset.py, utils.py, config.py, requirements.txt, ddrm.py, sample_ddrm.py, photoncube_preprocess.py, single_photon_ground_truth_diffusion
 transfer_output_files = single_photon_ground_truth_diffusion
 #output_destination = 
 #transfer_output_remaps = 

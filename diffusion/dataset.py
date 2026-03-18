@@ -10,6 +10,8 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 from huggingface_hub import snapshot_download
 
+from photoncube_preprocess import preprocess_photoncube, photoncube_file_to_tensor
+
 
 def resolve_dataset_root(
     source: str,
@@ -92,4 +94,85 @@ def get_single_photon_dataloader(
         shuffle=shuffle,
         num_workers=num_workers,
         pin_memory=torch.cuda.is_available(),
+    )
+
+class SinglePhotonRestorationDataset(Dataset):
+    """
+    Paired dataset:
+        measurement (photoncube-derived) + target (ground truth PNG)
+
+    Uses the same dataset root resolution as training.
+    """
+
+    def __init__(
+        self,
+        source: str,
+        local_dir: str,
+        hf_repo: str,
+        hf_revision: str,
+        num_frames: int = 16,
+        average: bool = False,
+        invert: bool = True,
+        invert_factor: float = 0.5,
+    ):
+        self.root_dir = resolve_dataset_root(
+            source,
+            local_dir,
+            hf_repo,
+            hf_revision,
+        )
+
+        self.num_frames = num_frames
+        self.average = average
+        self.invert = invert
+        self.invert_factor = invert_factor
+
+        self.samples = []
+
+        for npy_path in sorted(self.root_dir.rglob("*.npy")):
+            png_path = npy_path.with_suffix(".png")
+            if png_path.exists():
+                self.samples.append((npy_path, png_path))
+
+        if len(self.samples) == 0:
+            raise RuntimeError(f"No paired samples found in {self.root_dir}")
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx) -> Tuple[Tensor, Tensor]:
+        npy_path, png_path = self.samples[idx]
+
+        measurement = photoncube_file_to_tensor(
+            str(npy_path),
+            num_frames=self.num_frames,
+            average=self.average,
+            invert=self.invert,
+            invert_factor=self.invert_factor,
+        )
+
+        img = Image.open(png_path).convert("RGB")
+        target = torch.from_numpy(np.array(img).astype(np.float32) / 255.0).permute(2, 0, 1)
+        target = target * 2 - 1
+
+        return measurement, target
+
+
+def get_single_photon_restoration_dataloader(config):
+    dataset = SinglePhotonRestorationDataset(
+        source=config["dataset_source"],
+        local_dir=config["dataset_local_dir"],
+        hf_repo=config["dataset_hf_repo"],
+        hf_revision=config["dataset_hf_revision"],
+        num_frames=config["num_frames"],
+        average=config["average"],
+        invert=config["invert"],
+        invert_factor=config["invert_factor"],
+    )
+
+    return DataLoader(
+        dataset,
+        batch_size=config["batch_size"],
+        shuffle=False,
+        num_workers=config["num_workers"],
     )
