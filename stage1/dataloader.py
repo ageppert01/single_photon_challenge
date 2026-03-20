@@ -8,8 +8,9 @@ GT: same path with .png extension (last-frame reconstruction).
 
 from __future__ import annotations
 
+from collections import defaultdict
 from pathlib import Path
-from typing import Iterator, List, Optional, Tuple, Union
+from typing import Iterator, List, Literal, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -238,6 +239,103 @@ class PhotonCubeDataset(Dataset):
             gt_full = gt_full.to(device)
             gt_ds = gt_ds.to(device)
         return _chunk_iter(), gt_full, gt_ds
+
+
+class Stage1TrainDataset(Dataset):
+    """
+    Training data: local disk OR Hugging Face dataset.
+
+    - **local**: ``data_root`` / ``split`` / ``<scene>`` / ``*.npy`` + ``*.png``.
+    - **hf**: Hugging Face ``repo_id`` with ``train_subdir`` (e.g. ``train/``).
+
+    Optionally limits to the first ``samples_per_folder`` pairs per scene (sorted by
+    filename). Use ``samples_per_folder=0`` for no limit.
+    """
+
+    def __init__(
+        self,
+        source: Literal["local", "hf"] = "local",
+        data_root: Optional[Union[str, Path]] = None,
+        split: str = "train",
+        samples_per_folder: int = 20,
+        hf_repo: str = "ageppert/single_photon_challenge_full_preprocessed",
+        hf_train_subdir: str = "train",
+    ):
+        self.source = source
+        self.hf_repo = hf_repo
+        if source == "local":
+            if data_root is None:
+                raise ValueError("data_root is required when source='local'")
+            self.root = Path(data_root) / split
+            if not self.root.is_dir():
+                raise FileNotFoundError(f"Not a directory: {self.root}")
+            self.samples = self._scan_local(samples_per_folder)
+        elif source == "hf":
+            self.samples = self._scan_hf(hf_train_subdir, samples_per_folder)
+        else:
+            raise ValueError(f"Unknown source: {source}")
+
+    def _scan_local(self, k: int) -> List[Tuple[Path, Path]]:
+        folders: dict[Path, List[Tuple[Path, Path]]] = defaultdict(list)
+        for npy_path in sorted(self.root.glob("**/*.npy")):
+            if not npy_path.is_file():
+                continue
+            gt_path = npy_path.with_suffix(".png")
+            if gt_path.is_file():
+                folders[npy_path.parent].append((npy_path, gt_path))
+        out: List[Tuple[Path, Path]] = []
+        for folder in sorted(folders.keys()):
+            pairs = sorted(folders[folder], key=lambda x: x[0].name)
+            if k and k > 0:
+                pairs = pairs[:k]
+            out.extend(pairs)
+        return out
+
+    def _scan_hf(self, train_subdir: str, k: int) -> List[Tuple[str, str, str]]:
+        try:
+            from huggingface_hub import list_repo_files
+        except ImportError as e:
+            raise ImportError("Install huggingface_hub for source='hf'") from e
+
+        prefix = train_subdir.rstrip("/") + "/"
+        all_files = list_repo_files(self.hf_repo, repo_type="dataset")
+        all_set = set(all_files)
+        folders: dict[str, List[Tuple[str, str]]] = defaultdict(list)
+        for f in all_files:
+            if not f.startswith(prefix) or "/" not in f[len(prefix) :]:
+                continue
+            rest = f[len(prefix) :]
+            parts = rest.split("/")
+            if len(parts) != 2:
+                continue
+            folder_name, fname = parts
+            if fname.endswith(".npy"):
+                png_rel = prefix + folder_name + "/" + fname.replace(".npy", ".png")
+                if png_rel in all_set:
+                    folders[folder_name].append((f, png_rel))
+        out: List[Tuple[str, str, str]] = []
+        for folder_name in sorted(folders.keys()):
+            pairs = sorted(folders[folder_name], key=lambda x: x[0])
+            if k and k > 0:
+                pairs = pairs[:k]
+            for rel_npy, rel_png in pairs:
+                out.append((self.hf_repo, rel_npy, rel_png))
+        return out
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, idx: int) -> Tuple[Path, Path]:
+        if self.source == "local":
+            return self.samples[idx][0], self.samples[idx][1]
+        try:
+            from huggingface_hub import hf_hub_download
+        except ImportError as e:
+            raise ImportError("Install huggingface_hub for source='hf'") from e
+        repo_id, rel_npy, rel_png = self.samples[idx]
+        npy_path = hf_hub_download(repo_id, rel_npy, repo_type="dataset")
+        png_path = hf_hub_download(repo_id, rel_png, repo_type="dataset")
+        return Path(npy_path), Path(png_path)
 
 
 def get_dataloader(

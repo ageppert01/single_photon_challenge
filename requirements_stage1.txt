@@ -10,3 +10,6 @@ imageio>=2.9
 # For validation metrics (same as eval_single.py)
 pytorch-msssim>=0.2
 lpips>=0.1
+
+# Optional: training from Hugging Face
+huggingface_hub>=0.20

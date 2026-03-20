@@ -1,8 +1,11 @@
 """
 Train Stage 1 RNN: ConvLSTM + decoder head supervised to GT.
 
-Usage:
-  python -m stage1.train --data_root /path/to/data --scale 0.25 --chunk_size 64 --epochs 10
+Local data (Drive or disk):
+  python -m stage1.train --data_source local --data_root /path/to/parent --split train --scale 0.25
+
+Hugging Face (no local path; downloads to HF cache):
+  python -m stage1.train --data_source hf --scale 0.25 --samples_per_folder 20
 """
 
 from __future__ import annotations
@@ -14,14 +17,44 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from stage1.dataloader import PhotonCubeDataset
+from stage1.dataloader import PhotonCubeDataset, Stage1TrainDataset
 from stage1.model import Stage1RNN
 
 
 def parse_args():
     p = argparse.ArgumentParser(description="Train Stage 1 RNN (ConvLSTM + decoder)")
-    p.add_argument("--data_root", type=str, required=True, help="Root dir containing train/ with scene/*.npy and *.png")
+    p.add_argument(
+        "--data_source",
+        type=str,
+        choices=["local", "hf"],
+        default="local",
+        help="local = data_root on disk/Drive; hf = Hugging Face dataset",
+    )
+    p.add_argument(
+        "--data_root",
+        type=str,
+        default=None,
+        help="Parent of train/ folder (required when data_source=local), e.g. /path/to/data",
+    )
     p.add_argument("--split", type=str, default="train")
+    p.add_argument(
+        "--hf_repo",
+        type=str,
+        default="ageppert/single_photon_challenge_full_preprocessed",
+        help="Hugging Face dataset id when data_source=hf",
+    )
+    p.add_argument(
+        "--hf_train_subdir",
+        type=str,
+        default="train",
+        help="Subfolder inside the HF repo (train split)",
+    )
+    p.add_argument(
+        "--samples_per_folder",
+        type=int,
+        default=20,
+        help="First N .npy+.png pairs per scene folder (sorted by filename). 0 = use all pairs.",
+    )
     p.add_argument("--scale", type=float, default=0.25, help="Spatial scale for RNN (0.25 -> 200x200)")
     p.add_argument("--chunk_size", type=int, default=64, help="Frames per chunk")
     p.add_argument("--hidden", type=int, default=64, help="ConvLSTM hidden channels")
@@ -83,9 +116,25 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Data
-    dataset = PhotonCubeDataset(root=args.data_root, split=args.split)
+    if args.data_source == "local":
+        if args.data_root is None:
+            raise ValueError("--data_root is required when --data_source=local")
+        dataset = Stage1TrainDataset(
+            source="local",
+            data_root=args.data_root,
+            split=args.split,
+            samples_per_folder=args.samples_per_folder,
+        )
+    else:
+        dataset = Stage1TrainDataset(
+            source="hf",
+            hf_repo=args.hf_repo,
+            hf_train_subdir=args.hf_train_subdir,
+            samples_per_folder=args.samples_per_folder,
+        )
     if len(dataset) == 0:
-        raise FileNotFoundError(f"No .npy+.png pairs under {Path(args.data_root)/args.split}")
+        raise FileNotFoundError("No training samples found (check paths or HF repo access)")
+    print(f"Training samples: {len(dataset)} (data_source={args.data_source})")
     loader = DataLoader(
         dataset,
         batch_size=args.batch_size,
