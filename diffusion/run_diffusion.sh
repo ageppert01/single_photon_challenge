@@ -19,12 +19,18 @@ mkdir -p "$HF_HOME"
 echo "Installing Python dependencies"
 python -m pip install --no-cache-dir -r requirements.txt
 
+# Number of GPUs — auto-detect or override with NUM_GPUS env var
+NUM_GPUS="${NUM_GPUS:-$(python -c 'import torch; print(torch.cuda.device_count())')}"
+echo "Using $NUM_GPUS GPU(s)"
+
 echo "===== START TRAINING ====="
-python train.py
+# Use torchrun for multi-GPU DDP; falls back gracefully to 1 GPU
+torchrun --standalone --nproc_per_node="$NUM_GPUS" train.py
 
 echo "===== TRAINING COMPLETE ====="
 
 echo "===== START SAMPLING ====="
+# Sampling is single-GPU only (fast, no DDP needed)
 python sample.py
 
 echo "===== SAMPLING COMPLETE ====="

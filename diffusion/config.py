@@ -75,7 +75,7 @@ TRAIN_CONFIG = {
     **{k: v for k, v in _active_dataset_config().items()},
 
     "batch_size": 1,
-    "num_epochs": 500,
+    "num_epochs": 50,
     "lr": 1e-4,
     "num_workers": 2,
 

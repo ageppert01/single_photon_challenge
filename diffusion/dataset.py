@@ -203,18 +203,18 @@ class PreprocessedPairedDataset(Dataset):
         return measurement, target
 
 
-# ── Unified dataloader factories ─────────────────────────────────────────────
+# ── Unified dataset / dataloader factories ───────────────────────────────────
 
 
-def get_training_dataloader(config: dict) -> DataLoader:
+def get_training_dataset(config: dict) -> Dataset:
     """
-    Return a training DataLoader based on the dataset mode in *config*.
+    Return the training Dataset based on the dataset mode in *config*.
 
-    - "sample" mode: loads ground-truth PNGs only (each batch element is a
-      single tensor).
-    - "full" mode: loads preprocessed measurement/target pairs (each batch
-      element is a (measurement, target) tuple; target is always present
-      in the train split).
+    Use this when you need the raw Dataset (e.g. to attach a
+    DistributedSampler for DDP training).
+
+    - "sample" mode: SinglePhotonGroundTruthDataset (tensor per sample).
+    - "full" mode: PreprocessedPairedDataset (measurement, target) tuples.
     """
     mode = config["dataset_mode"]
 
@@ -225,10 +225,10 @@ def get_training_dataloader(config: dict) -> DataLoader:
             config["dataset_hf_repo"],
             config["dataset_hf_revision"],
         )
-        dataset = SinglePhotonGroundTruthDataset(root)
+        return SinglePhotonGroundTruthDataset(root)
 
     elif mode == "full":
-        dataset = PreprocessedPairedDataset(
+        return PreprocessedPairedDataset(
             source=config["dataset_source"],
             local_dir=config.get("dataset_local_dir"),
             hf_repo=config.get("dataset_hf_repo"),
@@ -238,6 +238,16 @@ def get_training_dataloader(config: dict) -> DataLoader:
 
     else:
         raise ValueError(f"Unknown dataset_mode: {mode!r}")
+
+
+def get_training_dataloader(config: dict) -> DataLoader:
+    """
+    Convenience wrapper: build dataset + single-process DataLoader.
+
+    For DDP, use get_training_dataset() and construct the DataLoader
+    yourself with a DistributedSampler.
+    """
+    dataset = get_training_dataset(config)
 
     return DataLoader(
         dataset,

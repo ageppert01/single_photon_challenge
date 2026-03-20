@@ -51,7 +51,7 @@ when_to_transfer_output = ON_EXIT
 
 # Requirements (e.g., operating system) your job needs, what amount of
 # compute resources each job will need on the computer where it runs.
-request_cpus = 2
+request_cpus = 8
 request_memory = 40GB
 request_disk = 40GB
 
@@ -75,7 +75,7 @@ gpus_minimum_memory = 40GB
 # Indicate shorter/resumeable jobs, i.e., have ability to checkpoint
 #+is_resumable = true
 
-request_gpus = 1
+request_gpus = 4
 ##########################################
 ########## Number of Job Copies ##########
 
