@@ -27,16 +27,44 @@ python -m stage1.train --data_source local --data_root /path/to/parent --split t
 
 - `--samples_per_folder 20`: first 20 pairs per scene folder (sorted by filename). Use `0` for all pairs in each folder.
 
-**Hugging Face** ([ageppert/single_photon_challenge_full_preprocessed](https://huggingface.co/datasets/ageppert/single_photon_challenge_full_preprocessed)): no `data_root`; files cache under `~/.cache/huggingface`.
+### Train with Hugging Face (no local data path)
+
+Dataset: [ageppert/single_photon_challenge_full_preprocessed](https://huggingface.co/datasets/ageppert/single_photon_challenge_full_preprocessed) (`train/` with many scenes; each `.npy` has a matching `.png`).
+
+Install the Hub client, then run from the repo root:
 
 ```bash
 pip install huggingface_hub
-python -m stage1.train --data_source hf --scale 0.25 --epochs 10 --out_dir stage1_checkpoints \
-  --samples_per_folder 20
+
+python -m stage1.train \
+  --data_source hf \
+  --hf_repo ageppert/single_photon_challenge_full_preprocessed \
+  --hf_train_subdir train \
+  --samples_per_folder 20 \
+  --scale 0.25 \
+  --chunk_size 64 \
+  --epochs 15 \
+  --out_dir stage1_checkpoints
 ```
 
-- `--hf_repo`: default `ageppert/single_photon_challenge_full_preprocessed`
-- `--hf_train_subdir`: default `train`
+**Colab / Drive for checkpoints only** (save weights to Drive; data still streams from HF):
+
+```bash
+cd /content/drive/MyDrive/Colab\ Notebooks/single_photon_challenge
+pip install -r requirements_stage1.txt
+
+python -m stage1.train \
+  --data_source hf \
+  --scale 0.25 \
+  --chunk_size 64 \
+  --epochs 15 \
+  --out_dir /content/drive/MyDrive/single_photon_checkpoints
+```
+
+- **`--hf_repo`**: default is `ageppert/single_photon_challenge_full_preprocessed` (omit to use default).
+- **`--hf_train_subdir`**: default `train`.
+- **`--samples_per_folder`**: first *N* `.npy`+`.png` pairs per scene (sorted by filename). Use `0` for all pairs per folder.
+- First run downloads into the Hugging Face cache (`~/.cache/huggingface`); later runs reuse cached files.
 
 - `--scale 0.25`: run RNN at 200×200 (saves memory).
 - `--max_samples N`: cap samples per epoch (for debugging).
