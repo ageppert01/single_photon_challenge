@@ -1,0 +1,55 @@
+# preprocess_and_upload.sub — Preprocess full dataset + upload to HuggingFace
+#
+# Preprocesses photoncubes into PNG pairs on local scratch, then uploads
+# everything to HuggingFace before the job ends. The compute node's disk
+# is ephemeral — HuggingFace is the durable storage.
+#
+# REPO_ID and HF_TOKEN are required.
+#
+# Usage (from scripts/):
+#   mkdir -p ../logs
+#   condor_submit preprocess_and_upload.sub \
+#       REPO_ID=your-username/spc-preprocessed \
+#       HF_TOKEN=hf_xxxxx
+#
+#   # Private repo:
+#   condor_submit preprocess_and_upload.sub \
+#       REPO_ID=your-username/spc-preprocessed \
+#       HF_TOKEN=hf_xxxxx \
+#       PRIVATE=true
+#
+#   # Override preprocessing defaults:
+#   condor_submit preprocess_and_upload.sub \
+#       REPO_ID=your-username/spc-preprocessed \
+#       HF_TOKEN=hf_xxxxx \
+#       NUM_FRAMES=64
+
+universe   = vanilla
+executable = run_preprocess_and_upload.sh
+
+log    = logs/preprocess_$(Cluster).log
+output = logs/preprocess_$(Cluster).out
+error  = logs/preprocess_$(Cluster).err
+
+# Preprocessing defaults (override on command line)
+SPLIT         =
+NUM_FRAMES    = 16
+INVERT_FACTOR = 0.5
+
+# Upload settings (required)
+REPO_ID  = ageppert/single_photon_challenge_full_preprocessed
+HF_TOKEN = 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
+PRIVATE  = false
+
+request_cpus   = 4
+request_memory = 8GB
+request_disk   = 30GB
+
+environment = "SPLIT=$(SPLIT) NUM_FRAMES=$(NUM_FRAMES) INVERT_FACTOR=$(INVERT_FACTOR) REPO_ID=$(REPO_ID) HF_TOKEN=$(HF_TOKEN) PRIVATE=$(PRIVATE)"
+
+should_transfer_files   = YES
+transfer_input_files    = preprocess_full_dataset.py, upload_to_hf.py, ../diffusion/photoncube_preprocess.py
+
+# No transfer_output_files — data is uploaded to HuggingFace, not transferred back
+
+queue 1

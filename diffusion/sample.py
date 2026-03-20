@@ -10,8 +10,7 @@ from config import (
     checkpoint_path,
     generated_samples_path,
 )
-
-from diffusion import LinearNoiseScheduler, sample_ddpm, sample_ddim
+from diffusion import LinearNoiseScheduler, sample_ddpm
 from model import UNet
 from utils import load_checkpoint, save_image_grid
 
@@ -21,7 +20,6 @@ def main() -> None:
     scheduler = LinearNoiseScheduler(**DIFFUSION_CONFIG)
 
     model = UNet(MODEL_CONFIG)
-
     model = load_checkpoint(model, checkpoint_path(), DEVICE)
 
     num_samples = TRAIN_CONFIG["num_generated_samples"]

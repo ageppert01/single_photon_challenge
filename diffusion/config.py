@@ -5,6 +5,8 @@ import torch
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+# ── Diffusion noise schedule ──────────────────────────────────────────────────
+
 DIFFUSION_CONFIG = {
     "num_timesteps": 1000,
     "beta_start": 1e-4,
@@ -12,13 +14,8 @@ DIFFUSION_CONFIG = {
     "device": DEVICE,
 }
 
-PHOTONCUBE_PREPROCESS_CONFIG = {
-    "num_frames": 16,
-    "average": False,
-    "invert_response": True,
-    "invert_response_factor": 0.5,
-}
 
+# ── UNet architecture ─────────────────────────────────────────────────────────
 
 MODEL_CONFIG = {
     "im_channels": 3,
@@ -27,19 +24,15 @@ MODEL_CONFIG = {
     "down_channels": [32, 64, 128, 256, 512],
     "mid_channels": [512, 512, 256],
 
-    "down_sample": [True, True, True, True],
     "down_attention": [False, False, False, True],
     "mid_attention": True,
     "up_attention": [True, False, False, False],
 
     "time_emb_dim": 128,
-    "num_heads": 4,
-
-    "num_down_layers": 2,
-    "num_mid_layers": 2,
-    "num_up_layers": 2,
 }
 
+
+# ── Training ──────────────────────────────────────────────────────────────────
 
 TRAIN_CONFIG = {
     "task_name": "single_photon_ground_truth_diffusion",
@@ -64,10 +57,12 @@ TRAIN_CONFIG = {
 }
 
 
+# ── DDRM restoration (experimental) ──────────────────────────────────────────
+
 DDRM_CONFIG = {
     "observation_sigma": 0.1,
     "num_steps": 1000,
-    "output_dir": f"{TRAIN_CONFIG['task_name']}/ddrm_restoration"
+    "output_dir": f"{TRAIN_CONFIG['task_name']}/ddrm_restoration",
 }
 
 RESTORATION_DATA_CONFIG = {
@@ -77,14 +72,33 @@ RESTORATION_DATA_CONFIG = {
     "dataset_hf_revision": TRAIN_CONFIG["hf_dataset_revision"],
 
     "num_frames": 16,
-    "average": False,
-    "invert": True,
+    "invert_response": True,
     "invert_factor": 0.5,
+    "tonemap": True,
 
     "batch_size": 1,
     "num_workers": 4,
 }
 
+
+# ── Preprocessed full dataset ────────────────────────────────────────────────
+# PNG pairs produced by preprocess_full_dataset.py, hosted on HuggingFace
+# or stored locally. Switch dataset_source and paths as needed.
+
+PREPROCESSED_DATA_CONFIG = {
+    "dataset_source": "hf",
+    "dataset_local_dir": "./preprocessed",
+    "dataset_hf_repo": "ageppert/single_photon_challenge_preprocessed",
+    "dataset_hf_revision": "main",
+
+    "split": "train",
+    "batch_size": 1,
+    "shuffle": True,
+    "num_workers": 4,
+}
+
+
+# ── Path helpers ──────────────────────────────────────────────────────────────
 
 def checkpoint_path() -> str:
     return f"{TRAIN_CONFIG['task_name']}/{TRAIN_CONFIG['ckpt_name']}"

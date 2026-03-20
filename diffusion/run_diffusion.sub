@@ -30,9 +30,9 @@ arguments = $(Process)
 # "screen output") files. Wherever you see $(Cluster), HTCondor will insert the 
 #  queue number assigned to this set of jobs at the time of submission.
 JobName = run-diffusion
-log = $(JobName)_$(Cluster)_$(Process).log
-error = $(JobName)_$(Cluster)_$(Process).err
-output = $(JobName)_$(Cluster)_$(Process).out
+log = logs/$(JobName)_$(Cluster)_$(Process).log
+error = logs/$(JobName)_$(Cluster)_$(Process).err
+output = logs/$(JobName)_$(Cluster)_$(Process).out
 
 ##########################################
 ############# File Transfer  #############

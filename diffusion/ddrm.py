@@ -1,3 +1,14 @@
+"""
+Experimental DDRM sampler for quick baseline results.
+
+This uses a pretrained unconditional DDPM as a prior and fuses it with
+observations via a simplified posterior step. The posterior weighting is
+a naive 50/50 average (not time-dependent), so results will be limited.
+
+This module will be superseded by a Palette-style conditional diffusion
+model that learns the denoising mapping directly.
+"""
+
 import torch
 
 
@@ -33,7 +44,7 @@ class DDRMSampler:
             # x0 estimate
             x0_pred = (x - sqrt_one_minus_alpha * eps_pred) / sqrt_alpha
 
-            # Posterior fusion (Gaussian)
+            # Posterior fusion (naive equal-weight average)
             sigma_y = self.observation_sigma
 
             posterior_mean = (x0_pred + y) / 2.0
