@@ -7,10 +7,24 @@ from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
 
 from config import DEVICE, DIFFUSION_CONFIG, MODEL_CONFIG, TRAIN_CONFIG, checkpoint_path
-from dataset import get_single_photon_dataloader
+from dataset import get_training_dataloader
 from diffusion import LinearNoiseScheduler
 from model import UNet
 from utils import ensure_dir, save_checkpoint, seed_everything
+
+
+def _extract_target(batch, dataset_mode: str) -> torch.Tensor:
+    """
+    Normalise what the dataloader returns into a single target tensor.
+
+    - "sample" mode: batch is already a tensor (ground-truth only).
+    - "full" mode: batch is (measurement, target); we train on target.
+    """
+    if dataset_mode == "sample":
+        return batch
+    else:
+        _measurement, target = batch
+        return target
 
 
 def train(
@@ -22,6 +36,7 @@ def train(
     num_epochs: int,
     device: torch.device,
     save_path: str,
+    dataset_mode: str,
 ) -> None:
 
     model.train()
@@ -35,9 +50,9 @@ def train(
 
         optimizer.zero_grad()
 
-        for step, images in enumerate(tqdm(dataloader)):
+        for step, batch in enumerate(tqdm(dataloader)):
 
-            images = images.to(device)
+            images = _extract_target(batch, dataset_mode).to(device)
 
             noise = torch.randn_like(images)
 
@@ -95,15 +110,7 @@ def main() -> None:
 
     scheduler = LinearNoiseScheduler(**DIFFUSION_CONFIG)
 
-    dataloader = get_single_photon_dataloader(
-        batch_size=TRAIN_CONFIG["batch_size"],
-        source=TRAIN_CONFIG["dataset_source"],
-        local_dir=TRAIN_CONFIG["local_dataset_dir"],
-        hf_repo=TRAIN_CONFIG["hf_dataset_repo"],
-        hf_revision=TRAIN_CONFIG["hf_dataset_revision"],
-        shuffle=True,
-        num_workers=TRAIN_CONFIG["num_workers"],
-    )
+    dataloader = get_training_dataloader(TRAIN_CONFIG)
 
     model = UNet(MODEL_CONFIG).to(DEVICE)
 
@@ -120,6 +127,7 @@ def main() -> None:
         num_epochs=TRAIN_CONFIG["num_epochs"],
         device=DEVICE,
         save_path=checkpoint_path(),
+        dataset_mode=TRAIN_CONFIG["dataset_mode"],
     )
 
 

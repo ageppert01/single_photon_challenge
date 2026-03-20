@@ -5,7 +5,15 @@ import torch
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-# ── Diffusion noise schedule ──────────────────────────────────────────────────
+# ── Dataset mode ──────────────────────────────────────────────────────────────
+# Switch between the small sample dataset and the full preprocessed dataset.
+#   "sample"  – raw photoncubes + ground-truth PNGs  (small, for prototyping)
+#   "full"    – preprocessed measurement/target PNGs (2 035 images, train/test)
+
+DATASET_MODE = "full"
+
+
+# ── Diffusion noise schedule ─────────────────────────────────────────────────
 
 DIFFUSION_CONFIG = {
     "num_timesteps": 1000,
@@ -15,7 +23,7 @@ DIFFUSION_CONFIG = {
 }
 
 
-# ── UNet architecture ─────────────────────────────────────────────────────────
+# ── UNet architecture ────────────────────────────────────────────────────────
 
 MODEL_CONFIG = {
     "im_channels": 3,
@@ -32,15 +40,39 @@ MODEL_CONFIG = {
 }
 
 
-# ── Training ──────────────────────────────────────────────────────────────────
+# ── Dataset configs ──────────────────────────────────────────────────────────
+
+SAMPLE_DATASET_CONFIG = {
+    "dataset_source": "hf",
+    "dataset_local_dir": "./single_photon_sample/train",
+    "dataset_hf_repo": "ageppert/single_photon_challenge_sample_dataset",
+    "dataset_hf_revision": "main",
+}
+
+FULL_DATASET_CONFIG = {
+    "dataset_source": "hf",
+    "dataset_local_dir": "./preprocessed",
+    "dataset_hf_repo": "ageppert/single_photon_challenge_full_preprocessed",
+    "dataset_hf_revision": "main",
+}
+
+
+def _active_dataset_config() -> dict:
+    if DATASET_MODE == "sample":
+        return SAMPLE_DATASET_CONFIG
+    elif DATASET_MODE == "full":
+        return FULL_DATASET_CONFIG
+    else:
+        raise ValueError(f"Unknown DATASET_MODE: {DATASET_MODE!r}")
+
+
+# ── Training ─────────────────────────────────────────────────────────────────
 
 TRAIN_CONFIG = {
     "task_name": "single_photon_ground_truth_diffusion",
 
-    "dataset_source": "hf",
-    "local_dataset_dir": "./single_photon_sample/train",
-    "hf_dataset_repo": "ageppert/single_photon_challenge_sample_dataset",
-    "hf_dataset_revision": "main",
+    "dataset_mode": DATASET_MODE,
+    **{k: v for k, v in _active_dataset_config().items()},
 
     "batch_size": 1,
     "num_epochs": 500,
@@ -57,7 +89,7 @@ TRAIN_CONFIG = {
 }
 
 
-# ── DDRM restoration (experimental) ──────────────────────────────────────────
+# ── DDRM restoration (experimental) ─────────────────────────────────────────
 
 DDRM_CONFIG = {
     "observation_sigma": 0.1,
@@ -65,40 +97,36 @@ DDRM_CONFIG = {
     "output_dir": f"{TRAIN_CONFIG['task_name']}/ddrm_restoration",
 }
 
-RESTORATION_DATA_CONFIG = {
-    "dataset_source": TRAIN_CONFIG["dataset_source"],
-    "dataset_local_dir": TRAIN_CONFIG["local_dataset_dir"],
-    "dataset_hf_repo": TRAIN_CONFIG["hf_dataset_repo"],
-    "dataset_hf_revision": TRAIN_CONFIG["hf_dataset_revision"],
 
+# ── Restoration data config ──────────────────────────────────────────────────
+# Used by sample_ddrm.py.  In "sample" mode this loads raw photoncubes;
+# in "full" mode it loads preprocessed PNG pairs.
+
+_ds = _active_dataset_config()
+
+RESTORATION_DATA_CONFIG = {
+    "dataset_mode": DATASET_MODE,
+
+    "dataset_source": _ds["dataset_source"],
+    "dataset_local_dir": _ds["dataset_local_dir"],
+    "dataset_hf_repo": _ds["dataset_hf_repo"],
+    "dataset_hf_revision": _ds["dataset_hf_revision"],
+
+    # Only relevant in "sample" mode (raw photoncube preprocessing)
     "num_frames": 16,
     "invert_response": True,
     "invert_factor": 0.5,
     "tonemap": True,
 
-    "batch_size": 1,
-    "num_workers": 4,
-}
-
-
-# ── Preprocessed full dataset ────────────────────────────────────────────────
-# PNG pairs produced by preprocess_full_dataset.py, hosted on HuggingFace
-# or stored locally. Switch dataset_source and paths as needed.
-
-PREPROCESSED_DATA_CONFIG = {
-    "dataset_source": "hf",
-    "dataset_local_dir": "./preprocessed",
-    "dataset_hf_repo": "ageppert/single_photon_challenge_preprocessed",
-    "dataset_hf_revision": "main",
-
+    # Only relevant in "full" mode
     "split": "train",
+
     "batch_size": 1,
-    "shuffle": True,
     "num_workers": 4,
 }
 
 
-# ── Path helpers ──────────────────────────────────────────────────────────────
+# ── Path helpers ─────────────────────────────────────────────────────────────
 
 def checkpoint_path() -> str:
     return f"{TRAIN_CONFIG['task_name']}/{TRAIN_CONFIG['ckpt_name']}"
