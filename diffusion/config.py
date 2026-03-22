@@ -93,7 +93,7 @@ TRAIN_CONFIG = {
 
 DDRM_CONFIG = {
     "observation_sigma": 0.1,
-    "num_steps": 1000,
+    "num_steps": 250,
     "output_dir": f"{TRAIN_CONFIG['task_name']}/ddrm_restoration",
 }
 

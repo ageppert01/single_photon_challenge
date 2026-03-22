@@ -1,6 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
+PYTHONUNBUFFERED=1
+
 echo "===== JOB START ====="
 date
 hostname
@@ -25,18 +27,19 @@ echo "Using $NUM_GPUS GPU(s)"
 
 echo "===== START TRAINING ====="
 # Use torchrun for multi-GPU DDP; falls back gracefully to 1 GPU
-torchrun --standalone --nproc_per_node="$NUM_GPUS" train.py
+#torchrun --standalone --nproc_per_node="$NUM_GPUS" train.py
 
 echo "===== TRAINING COMPLETE ====="
 
 echo "===== START SAMPLING ====="
 # Sampling is single-GPU only (fast, no DDP needed)
-python sample.py
+#python sample.py
 
 echo "===== SAMPLING COMPLETE ====="
 
 echo "===== START RESTORATION ====="
-python sample_ddrm.py
+#python sample_ddrm.py
+python test_ddrm.py
 
 echo "===== RESTORATION COMPLETE ====="
 
