@@ -4,4 +4,4 @@
 
 *.pth
 
-diffusion/single_photon_ground_truth_diffusion/ddrm_restoration/*.png
+diffusion/single_photon_palette/restoration/*.png

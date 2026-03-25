@@ -108,10 +108,26 @@ class UpBlock(nn.Module):
 
 
 class UNet(nn.Module):
+    """
+    UNet noise-prediction network.
+
+    Supports two modes controlled by config["conditional"]:
+      - False (default, backward compatible): standard unconditional DDPM.
+        forward(x_t, t) -> predicted noise
+      - True (Palette-style): conditional image-to-image diffusion.
+        forward(x_t, t, condition) -> predicted noise
+        The condition (e.g. noisy measurement) is concatenated with x_t
+        along the channel dimension before the first convolution, so
+        init_conv accepts im_channels * 2 input channels.
+
+    The output always has im_channels channels (predicts noise on x_t only).
+    """
+
     def __init__(self, config):
         super().__init__()
 
         img_ch = config["im_channels"]
+        self.conditional = config.get("conditional", False)
         down_channels = config["down_channels"]
         mid_channels = config["mid_channels"]
 
@@ -121,7 +137,9 @@ class UNet(nn.Module):
 
         t_emb_dim = config["time_emb_dim"]
 
-        self.init_conv = nn.Conv2d(img_ch, down_channels[0], 3, padding=1)
+        # Palette-style: concatenate condition with x_t -> 2x input channels
+        in_channels = img_ch * 2 if self.conditional else img_ch
+        self.init_conv = nn.Conv2d(in_channels, down_channels[0], 3, padding=1)
 
         self.time_mlp = nn.Sequential(
             SinusoidalTimeEmbedding(t_emb_dim),
@@ -191,7 +209,21 @@ class UNet(nn.Module):
 
         self.final = nn.Conv2d(current_ch, img_ch, 1)
 
-    def forward(self, x, t):
+    def forward(self, x, t, condition=None):
+        """
+        Args:
+            x: noisy image x_t, shape (B, C, H, W)
+            t: timestep indices, shape (B,)
+            condition: (Palette mode only) measurement image, shape (B, C, H, W).
+                       Concatenated with x along channel dim before init_conv.
+        """
+        if self.conditional:
+            if condition is None:
+                raise ValueError(
+                    "Model is in conditional mode but no condition was provided. "
+                    "Pass the measurement as the `condition` argument."
+                )
+            x = torch.cat([x, condition], dim=1)  # (B, 2C, H, W)
 
         t_emb = self.time_mlp(t)
 
@@ -217,3 +249,55 @@ class UNet(nn.Module):
         x = self.final(x)
 
         return x
+
+
+def load_unconditional_into_conditional(
+    cond_model: UNet,
+    unconditional_ckpt_path: str,
+    device: torch.device,
+) -> UNet:
+    """
+    Load weights from a trained unconditional DDPM checkpoint into a
+    Palette-style conditional UNet.
+
+    Strategy for init_conv (the only layer that changes shape):
+      - Copy the pretrained 3-channel weights into the first 3 channels
+      - Zero-initialize the new 3 channels (condition path)
+
+    Zero-init means the model starts behaving exactly like the unconditional
+    prior at the beginning of fine-tuning, since the condition channels
+    contribute nothing. The model then gradually learns to use the
+    measurement signal.
+
+    All other layers are identical and loaded directly.
+    """
+    state = torch.load(unconditional_ckpt_path, map_location=device)
+
+    # Separate init_conv from the rest
+    init_conv_weight = state.pop("init_conv.weight")  # (out_ch, 3, 3, 3)
+    init_conv_bias = state.pop("init_conv.bias")       # (out_ch,)
+
+    # Load everything except init_conv (all shapes match)
+    missing, unexpected = cond_model.load_state_dict(state, strict=False)
+
+    # Verify only init_conv keys are missing
+    expected_missing = {"init_conv.weight", "init_conv.bias"}
+    actual_missing = set(missing)
+    if actual_missing != expected_missing:
+        extra = actual_missing - expected_missing
+        if extra:
+            print(f"WARNING: unexpected missing keys: {extra}")
+
+    # Build the new init_conv weight: [pretrained_3ch | zeros_3ch]
+    out_ch = init_conv_weight.shape[0]
+    new_weight = cond_model.init_conv.weight.data  # (out_ch, 6, 3, 3)
+    new_weight.zero_()
+    new_weight[:, :3, :, :] = init_conv_weight  # copy pretrained channels
+
+    cond_model.init_conv.weight.data = new_weight
+    cond_model.init_conv.bias.data = init_conv_bias
+
+    print(f"Loaded unconditional checkpoint from {unconditional_ckpt_path}")
+    print(f"  init_conv: pretrained weights in channels 0-2, zeros in channels 3-5")
+
+    return cond_model

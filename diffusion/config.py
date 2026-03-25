@@ -7,8 +7,8 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ── Dataset mode ──────────────────────────────────────────────────────────────
 # Switch between the small sample dataset and the full preprocessed dataset.
-#   "sample"  – raw photoncubes + ground-truth PNGs  (small, for prototyping)
-#   "full"    – preprocessed measurement/target PNGs (2 035 images, train/test)
+#   "sample"  - raw photoncubes + ground-truth PNGs  (small, for prototyping)
+#   "full"    - preprocessed measurement/target PNGs (2 035 images, train/test)
 
 DATASET_MODE = "full"
 
@@ -40,6 +40,14 @@ MODEL_CONFIG = {
 }
 
 
+# ── Palette (conditional) UNet architecture ──────────────────────────────────
+
+PALETTE_MODEL_CONFIG = {
+    **MODEL_CONFIG,
+    "conditional": True,
+}
+
+
 # ── Dataset configs ──────────────────────────────────────────────────────────
 
 SAMPLE_DATASET_CONFIG = {
@@ -66,7 +74,7 @@ def _active_dataset_config() -> dict:
         raise ValueError(f"Unknown DATASET_MODE: {DATASET_MODE!r}")
 
 
-# ── Training ─────────────────────────────────────────────────────────────────
+# ── Training (unconditional) ─────────────────────────────────────────────────
 
 TRAIN_CONFIG = {
     "task_name": "single_photon_ground_truth_diffusion",
@@ -89,6 +97,42 @@ TRAIN_CONFIG = {
 }
 
 
+# ── Training (Palette conditional, custom UNet) ──────────────────────────────
+
+PALETTE_TRAIN_CONFIG = {
+    "task_name": "single_photon_palette",
+
+    "dataset_mode": "full",
+    **{k: v for k, v in FULL_DATASET_CONFIG.items()},
+
+    "batch_size": 1,
+    "num_epochs": 100,
+    "lr": 1e-4,
+    "num_workers": 2,
+
+    "gradient_accumulation": 2,
+    "use_amp": True,
+
+    "init_from_unconditional": True,
+    "unconditional_ckpt": f"{TRAIN_CONFIG['task_name']}/{TRAIN_CONFIG['ckpt_name']}",
+
+    "ckpt_name": "palette_ckpt.pth",
+    "seed": 42,
+
+    "self_conditioning_prob": 0.0,
+}
+
+
+# ── Palette sampling (custom UNet) ───────────────────────────────────────────
+
+PALETTE_SAMPLE_CONFIG = {
+    "num_steps": 250,           # DDIM steps (can go up to 1000 for DDPM)
+    "sampler": "ddim",          # "ddpm" or "ddim"
+    "eta": 0.0,                 # DDIM eta (0 = deterministic, 1 = full stochastic)
+    "output_dir": "single_photon_palette/restoration",
+}
+
+
 # ── DDRM restoration (experimental) ─────────────────────────────────────────
 
 DDRM_CONFIG = {
@@ -99,8 +143,6 @@ DDRM_CONFIG = {
 
 
 # ── Restoration data config ──────────────────────────────────────────────────
-# Used by sample_ddrm.py.  In "sample" mode this loads raw photoncubes;
-# in "full" mode it loads preprocessed PNG pairs.
 
 _ds = _active_dataset_config()
 
@@ -126,10 +168,47 @@ RESTORATION_DATA_CONFIG = {
 }
 
 
+# ── Stable Diffusion Palette ─────────────────────────────────────────────────
+
+SD_PALETTE_MODEL_CONFIG = {
+    "sd_model_id": "runwayml/stable-diffusion-v1-5",
+    "lora_rank": 64,
+    "lora_alpha": 64,
+}
+
+SD_PALETTE_TRAIN_CONFIG = {
+    "task_name": "single_photon_palette_sd",
+
+    "batch_size": 4,
+    "num_epochs": 50,
+    "lr": 1e-4,
+    "num_workers": 2,
+
+    "gradient_accumulation": 1,
+    "use_amp": True,
+
+    "seed": 42,
+}
+
+SD_PALETTE_SAMPLE_CONFIG = {
+    "num_steps": 50,
+    "eta": 0.0,
+    "output_dir": "single_photon_palette_sd/restoration",
+}
+
+
 # ── Path helpers ─────────────────────────────────────────────────────────────
 
 def checkpoint_path() -> str:
     return f"{TRAIN_CONFIG['task_name']}/{TRAIN_CONFIG['ckpt_name']}"
+
+
+def palette_checkpoint_path() -> str:
+    return f"{PALETTE_TRAIN_CONFIG['task_name']}/{PALETTE_TRAIN_CONFIG['ckpt_name']}"
+
+
+def sd_palette_checkpoint_dir() -> str:
+    return f"{SD_PALETTE_TRAIN_CONFIG['task_name']}/checkpoint"
 
 
 def generated_samples_path(method: str) -> str:
