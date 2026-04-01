@@ -4,10 +4,17 @@ Shared utilities for Stable Diffusion latent Palette.
 Handles:
   - Loading SD components (VAE, UNet, null text embeddings)
   - Expanding UNet conv_in for Palette conditioning (4ch -> 8ch)
-  - Applying LoRA to the UNet for efficient fine-tuning
+  - Selectively unfreezing conv_in + mid_block + decoder for training
   - Padding images to SD-compatible resolutions
   - Encoding / decoding through the frozen VAE
   - Saving / loading Palette-SD checkpoints
+
+V2: Replaced LoRA-only fine-tuning with selective unfreezing.
+    The LoRA approach failed because gradients could not flow back
+    through the frozen encoder to update the zero-initialized conv_in
+    condition channels. Now conv_in, mid_block, and the full decoder
+    are trainable, giving ~340M params and a direct gradient path
+    from the loss to the conditioning input.
 """
 
 from __future__ import annotations
@@ -20,7 +27,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from diffusers import AutoencoderKL, UNet2DConditionModel, DDPMScheduler
 from transformers import CLIPTextModel, CLIPTokenizer
-from peft import LoraConfig, get_peft_model, PeftModel
 
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -88,49 +94,37 @@ def _expand_conv_in(unet: UNet2DConditionModel) -> None:
     unet.conv_in = new
 
 
-def _get_conv_in(unet) -> nn.Conv2d:
+# ── Selective unfreezing ─────────────────────────────────────────────────────
+
+
+def _selective_unfreeze(unet: UNet2DConditionModel) -> None:
     """
-    Get the conv_in layer from a UNet that may be wrapped in PeftModel.
+    Freeze encoder, unfreeze conv_in + mid_block + decoder + output.
 
-    PeftModel attribute paths vary across peft versions:
-      - peft >= 0.10: unet.base_model.model.conv_in
-      - peft < 0.10:  unet.base_model.conv_in
-      - bare UNet:    unet.conv_in
+    This gives a direct gradient path from the MSE loss through the
+    decoder and mid_block back to conv_in, so the zero-initialized
+    condition channels can actually learn.
 
-    This helper tries all paths to be version-safe.
+    The encoder (down_blocks) stays frozen to preserve pretrained
+    feature extraction. Cross-attention layers in up_blocks are also
+    unfrozen, allowing the model to adapt how it uses the null
+    text embedding context.
+
+    Typical param count: ~340M trainable / ~860M total.
     """
-    # Direct attribute (bare UNet or some peft versions)
-    if hasattr(unet, "conv_in") and isinstance(unet.conv_in, nn.Conv2d):
-        return unet.conv_in
+    # First freeze everything
+    unet.requires_grad_(False)
 
-    # peft >= 0.10 path
-    if hasattr(unet, "base_model"):
-        base = unet.base_model
-        if hasattr(base, "model") and hasattr(base.model, "conv_in"):
-            return base.model.conv_in
-        if hasattr(base, "conv_in"):
-            return base.conv_in
-
-    raise AttributeError(
-        f"Cannot find conv_in on {type(unet).__name__}. "
-        f"Attributes: {[a for a in dir(unet) if not a.startswith('_')]}"
-    )
-
-
-# ── LoRA ─────────────────────────────────────────────────────────────────────
-
-
-def _apply_lora(unet: UNet2DConditionModel, rank: int, alpha: int) -> PeftModel:
-    """Wrap UNet with LoRA adapters on attention layers."""
-    config = LoraConfig(
-        r=rank,
-        lora_alpha=alpha,
-        target_modules=[
-            "to_q", "to_k", "to_v", "to_out.0",
-        ],
-        lora_dropout=0.0,
-    )
-    return get_peft_model(unet, config)
+    # Unfreeze: conv_in, mid_block, up_blocks (decoder), output layers
+    for name, param in unet.named_parameters():
+        if any(k in name for k in [
+            "conv_in",
+            "mid_block",
+            "up_blocks",
+            "conv_norm_out",
+            "conv_out",
+        ]):
+            param.requires_grad = True
 
 
 # ── Load / save ──────────────────────────────────────────────────────────────
@@ -139,8 +133,6 @@ def _apply_lora(unet: UNet2DConditionModel, rank: int, alpha: int) -> PeftModel:
 def load_sd_components(
     model_id: str,
     device: torch.device,
-    lora_rank: int = 64,
-    lora_alpha: int = 64,
     dtype: torch.dtype = torch.float16,
 ):
     """
@@ -148,7 +140,7 @@ def load_sd_components(
 
     Returns:
         vae:             Frozen AutoencoderKL
-        unet:            UNet with expanded conv_in + LoRA (trainable)
+        unet:            UNet with expanded conv_in, decoder unfrozen
         null_embeds:     Pre-computed null text embedding for cross-attn
         noise_scheduler: DDPMScheduler matching SD's pretrained schedule
     """
@@ -165,12 +157,8 @@ def load_sd_components(
         model_id, subfolder="unet", torch_dtype=dtype,
     )
     _expand_conv_in(unet)
-
-    # Gradient checkpointing MUST be enabled before LoRA wrapping,
-    # because PeftModel may not expose this method.
     unet.enable_gradient_checkpointing()
-
-    unet = _apply_lora(unet, lora_rank, lora_alpha)
+    _selective_unfreeze(unet)
     unet.to(device)
 
     trainable = sum(p.numel() for p in unet.parameters() if p.requires_grad)
@@ -216,18 +204,16 @@ def _compute_null_embedding(
 
 def save_palette_sd(unet, save_dir: str) -> None:
     """
-    Save LoRA weights + modified conv_in.
+    Save the full UNet state dict (trainable + frozen weights).
 
-    Works whether unet is a bare PeftModel or DDP-unwrapped PeftModel.
+    We save everything rather than just trainable params to keep
+    the loading logic simple and avoid key-matching issues.
+    The checkpoint is ~1.7 GB in fp16.
     """
     os.makedirs(save_dir, exist_ok=True)
-
-    unet.save_pretrained(os.path.join(save_dir, "lora"))
-
-    conv_in = _get_conv_in(unet)
     torch.save(
-        conv_in.state_dict(),
-        os.path.join(save_dir, "conv_in.pth"),
+        unet.state_dict(),
+        os.path.join(save_dir, "unet.pth"),
     )
     print(f"  Saved Palette-SD checkpoint to {save_dir}")
 
@@ -239,7 +225,7 @@ def load_palette_sd(
     dtype: torch.dtype = torch.float16,
 ):
     """
-    Load a trained Palette-SD model (LoRA + conv_in).
+    Load a trained Palette-SD model.
 
     Returns:
         vae, unet, null_embeds   (ready for inference)
@@ -249,17 +235,16 @@ def load_palette_sd(
     vae.eval()
     vae.requires_grad_(False)
 
+    # Build UNet shell with expanded conv_in, then load trained weights
     unet = UNet2DConditionModel.from_pretrained(
         model_id, subfolder="unet", torch_dtype=dtype,
     )
     _expand_conv_in(unet)
 
-    conv_in_path = os.path.join(save_dir, "conv_in.pth")
-    unet.conv_in.load_state_dict(torch.load(conv_in_path, map_location="cpu"))
-
-    lora_path = os.path.join(save_dir, "lora")
-    unet = PeftModel.from_pretrained(unet, lora_path)
-    unet.to(device)
+    ckpt_path = os.path.join(save_dir, "unet.pth")
+    state = torch.load(ckpt_path, map_location="cpu")
+    unet.load_state_dict(state)
+    unet.to(device=device, dtype=dtype)
     unet.eval()
 
     null_embeds = _compute_null_embedding(model_id, device, dtype)

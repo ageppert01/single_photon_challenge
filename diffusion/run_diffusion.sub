@@ -35,8 +35,8 @@ error = logs/$(JobName)_$(Cluster)_$(Process).err
 output = logs/$(JobName)_$(Cluster)_$(Process).out
 
 # Stream .out and .err files
-stream_output = True
-stream_error = True
+#stream_output = True
+#stream_error = True
 
 ##########################################
 ############# File Transfer  #############
@@ -54,7 +54,7 @@ when_to_transfer_output = ON_EXIT
 # Requirements (e.g., operating system) your job needs, what amount of
 # compute resources each job will need on the computer where it runs.
 request_cpus = 6
-request_memory = 40GB
+request_memory = 80GB
 request_disk = 60GB
 
 ##########################################
@@ -75,7 +75,7 @@ request_disk = 60GB
 gpus_minimum_memory = 40GB
 
 # Indicate shorter/resumeable jobs, i.e., have ability to checkpoint
-#+is_resumable = true
++is_resumable = true
 
 request_gpus = 4
 ##########################################

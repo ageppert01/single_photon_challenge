@@ -10,12 +10,13 @@ Pipeline per training step:
   4. UNet predicts noise from cat(z_noisy, z_meas) + null text embedding
   5. MSE loss between predicted and true noise
 
-Only the LoRA adapters and the expanded conv_in are trainable.
-Everything else (VAE, text encoder, base UNet weights) is frozen.
+V2: Selective unfreezing (conv_in + mid_block + decoder) replaces LoRA.
+    Also fixes DDP forward call and adds LR warmup + cosine schedule.
 """
 
 from __future__ import annotations
 
+import math
 import os
 
 import torch
@@ -24,6 +25,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 from torch.optim import AdamW
+from torch.optim.lr_scheduler import LambdaLR
 from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
 
@@ -77,6 +79,26 @@ def _cleanup_distributed() -> None:
         dist.destroy_process_group()
 
 
+# ── LR schedule ──────────────────────────────────────────────────────────────
+
+
+def _get_cosine_schedule_with_warmup(
+    optimizer: torch.optim.Optimizer,
+    warmup_steps: int,
+    total_steps: int,
+    min_lr_ratio: float = 0.1,
+) -> LambdaLR:
+    """Linear warmup then cosine decay to min_lr_ratio * base_lr."""
+
+    def lr_lambda(current_step: int) -> float:
+        if current_step < warmup_steps:
+            return current_step / max(1, warmup_steps)
+        progress = (current_step - warmup_steps) / max(1, total_steps - warmup_steps)
+        return min_lr_ratio + (1.0 - min_lr_ratio) * 0.5 * (1.0 + math.cos(math.pi * progress))
+
+    return LambdaLR(optimizer, lr_lambda)
+
+
 # ── Training ─────────────────────────────────────────────────────────────────
 
 
@@ -97,12 +119,12 @@ def main() -> None:
     vae, unet, null_embeds, noise_scheduler = load_sd_components(
         model_id=SD_PALETTE_MODEL_CONFIG["sd_model_id"],
         device=device,
-        lora_rank=SD_PALETTE_MODEL_CONFIG["lora_rank"],
-        lora_alpha=SD_PALETTE_MODEL_CONFIG["lora_alpha"],
         dtype=torch.float16,
     )
 
-    # Upcast trainable params (LoRA + conv_in) to fp32 for stable training
+    # Upcast trainable params to fp32 for stable mixed-precision training.
+    # Frozen encoder stays in fp16 (saves memory), but trainable decoder +
+    # conv_in + mid_block are in fp32 so optimizer updates are precise.
     for p in unet.parameters():
         if p.requires_grad:
             p.data = p.data.float()
@@ -134,36 +156,57 @@ def main() -> None:
     # ── Optionally resume ─────────────────────────────────────────────────
     save_dir = sd_palette_checkpoint_dir()
     start_epoch = 0
+    global_step = 0
 
     resume_path = os.path.join(save_dir, "training_state.pth")
     if os.path.isfile(resume_path):
         if _is_main_process():
             print(f"Resuming from {resume_path}")
-        state = torch.load(resume_path, map_location="cpu")
-        start_epoch = state["epoch"] + 1
+        resume_state = torch.load(resume_path, map_location="cpu")
+        start_epoch = resume_state["epoch"] + 1
+        global_step = resume_state.get("global_step", 0)
 
-        _vae, unet, _null = load_palette_sd(
-            SD_PALETTE_MODEL_CONFIG["sd_model_id"],
-            save_dir, device,
-        )
+        # Load trained weights directly into the UNet
+        ckpt_path = os.path.join(save_dir, "unet.pth")
+        state = torch.load(ckpt_path, map_location="cpu")
+        unet.load_state_dict(state)
+        del state
+        # Re-upcast trainable params (checkpoint has mixed fp32/fp16)
+        for p in unet.parameters():
+            if p.requires_grad:
+                p.data = p.data.float()
         unet.train()
 
     # ── Wrap in DDP ───────────────────────────────────────────────────────
     if _is_distributed():
-        unet = DDP(unet, device_ids=[_local_rank()], find_unused_parameters=True)
+        unet = DDP(
+            unet,
+            device_ids=[_local_rank()],
+            find_unused_parameters=False,  # No unused params with selective unfreeze
+        )
 
-    # ── Optimizer ─────────────────────────────────────────────────────────
+    # ── Optimizer + scheduler ─────────────────────────────────────────────
     trainable_params = [p for p in unet.parameters() if p.requires_grad]
     optimizer = AdamW(trainable_params, lr=cfg["lr"], weight_decay=1e-2)
 
+    accumulation = cfg["gradient_accumulation"]
+    steps_per_epoch = len(dataloader) // accumulation
+    total_steps = steps_per_epoch * cfg["num_epochs"]
+    warmup_steps = cfg.get("warmup_steps", 500)
+
+    scheduler = _get_cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps)
+
     if os.path.isfile(resume_path):
-        state = torch.load(resume_path, map_location="cpu")
-        optimizer.load_state_dict(state["optimizer"])
+        optimizer.load_state_dict(resume_state["optimizer"])
+        if "scheduler" in resume_state:
+            scheduler.load_state_dict(resume_state["scheduler"])
+        # Advance scheduler to the right step
+        for _ in range(global_step):
+            scheduler.step()
         if _is_main_process():
-            print(f"  Resuming from epoch {start_epoch}")
+            print(f"  Resumed from epoch {start_epoch}, step {global_step}")
 
     scaler = GradScaler(enabled=cfg["use_amp"])
-    accumulation = cfg["gradient_accumulation"]
 
     # ── Training loop ─────────────────────────────────────────────────────
 
@@ -213,9 +256,8 @@ def main() -> None:
                     z_input.shape[0], -1, -1
                 )
 
-                # Handle DDP-wrapped vs bare model
-                model_fn = unet.module if _is_distributed() else unet
-                noise_pred = model_fn(
+                # Call through DDP wrapper for correct gradient sync
+                noise_pred = unet(
                     z_input,
                     timesteps,
                     encoder_hidden_states=encoder_hidden_states,
@@ -232,9 +274,12 @@ def main() -> None:
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()
+                scheduler.step()
+                global_step += 1
 
             epoch_loss += loss.item() * accumulation
-            pbar.set_postfix(loss=f"{loss.item() * accumulation:.6f}")
+            current_lr = optimizer.param_groups[0]["lr"]
+            pbar.set_postfix(loss=f"{loss.item() * accumulation:.6f}", lr=f"{current_lr:.2e}")
 
         # Flush remaining gradients
         if len(dataloader) % accumulation != 0:
@@ -243,16 +288,28 @@ def main() -> None:
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
+            scheduler.step()
+            global_step += 1
 
         epoch_loss /= max(len(dataloader), 1)
 
         if _is_main_process():
-            print(f"Epoch {epoch+1}/{cfg['num_epochs']} | Loss {epoch_loss:.6f}")
+            print(
+                f"Epoch {epoch+1}/{cfg['num_epochs']} | "
+                f"Loss {epoch_loss:.6f} | "
+                f"LR {current_lr:.2e} | "
+                f"Step {global_step}"
+            )
 
             raw_unet = unet.module if _is_distributed() else unet
             save_palette_sd(raw_unet, save_dir)
             torch.save(
-                {"epoch": epoch, "optimizer": optimizer.state_dict()},
+                {
+                    "epoch": epoch,
+                    "global_step": global_step,
+                    "optimizer": optimizer.state_dict(),
+                    "scheduler": scheduler.state_dict(),
+                },
                 os.path.join(save_dir, "training_state.pth"),
             )
 

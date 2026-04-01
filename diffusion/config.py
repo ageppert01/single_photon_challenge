@@ -172,20 +172,20 @@ RESTORATION_DATA_CONFIG = {
 
 SD_PALETTE_MODEL_CONFIG = {
     "sd_model_id": "runwayml/stable-diffusion-v1-5",
-    "lora_rank": 64,
-    "lora_alpha": 64,
 }
 
 SD_PALETTE_TRAIN_CONFIG = {
     "task_name": "single_photon_palette_sd",
 
-    "batch_size": 4,
-    "num_epochs": 50,
-    "lr": 1e-4,
+    "batch_size": 6,
+    "num_epochs": 500,
+    "lr": 5e-5,                     # 2x lower than before (was 1e-4)
     "num_workers": 2,
 
-    "gradient_accumulation": 1,
+    "gradient_accumulation": 4,     # effective batch = 4*4 GPUs*4 accum = 64
     "use_amp": True,
+
+    "warmup_steps": 50,            # linear warmup before cosine decay
 
     "seed": 42,
 }
