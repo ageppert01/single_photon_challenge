@@ -1,17 +1,10 @@
 """
-Palette-style conditional diffusion in Stable Diffusion's latent space.
+Palette-style conditional diffusion in Stable Diffusion latent space.
 
-Supports multi-GPU training via DDP (launch with torchrun).
-
-Pipeline per training step:
-  1. Encode measurement -> z_meas  (frozen VAE, deterministic)
-  2. Encode target     -> z_target (frozen VAE, sampled)
-  3. Add noise to z_target at random timestep
-  4. UNet predicts noise from cat(z_noisy, z_meas) + null text embedding
-  5. MSE loss between predicted and true noise
-
-V2: Selective unfreezing (conv_in + mid_block + decoder) replaces LoRA.
-    Also fixes DDP forward call and adds LR warmup + cosine schedule.
+Unified version:
+  - SD 1.5 (epsilon-prediction) or SD 2.1 (v-prediction): auto-detected
+  - Optional gQIR qVAE for measurement encoding: controlled by config
+  - Selective unfreezing, DDP, LR warmup + cosine decay
 """
 
 from __future__ import annotations
@@ -40,8 +33,8 @@ from dataset import get_training_dataset
 from sd_utils import (
     load_sd_components,
     save_palette_sd,
-    load_palette_sd,
     encode_to_latent,
+    encode_measurement,
 )
 from utils import ensure_dir, seed_everything
 
@@ -83,19 +76,13 @@ def _cleanup_distributed() -> None:
 
 
 def _get_cosine_schedule_with_warmup(
-    optimizer: torch.optim.Optimizer,
-    warmup_steps: int,
-    total_steps: int,
-    min_lr_ratio: float = 0.1,
+    optimizer, warmup_steps, total_steps, min_lr_ratio=0.1,
 ) -> LambdaLR:
-    """Linear warmup then cosine decay to min_lr_ratio * base_lr."""
-
-    def lr_lambda(current_step: int) -> float:
-        if current_step < warmup_steps:
-            return current_step / max(1, warmup_steps)
-        progress = (current_step - warmup_steps) / max(1, total_steps - warmup_steps)
+    def lr_lambda(step):
+        if step < warmup_steps:
+            return step / max(1, warmup_steps)
+        progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
         return min_lr_ratio + (1.0 - min_lr_ratio) * 0.5 * (1.0 + math.cos(math.pi * progress))
-
     return LambdaLR(optimizer, lr_lambda)
 
 
@@ -106,6 +93,7 @@ def main() -> None:
 
     device = _setup_distributed()
     cfg = SD_PALETTE_TRAIN_CONFIG
+    model_cfg = SD_PALETTE_MODEL_CONFIG
     seed_everything(cfg["seed"])
 
     task_dir = cfg["task_name"]
@@ -116,20 +104,19 @@ def main() -> None:
         dist.barrier()
 
     # ── Load SD components ────────────────────────────────────────────────
-    vae, unet, null_embeds, noise_scheduler = load_sd_components(
-        model_id=SD_PALETTE_MODEL_CONFIG["sd_model_id"],
+    meas_vae, vae, unet, null_embeds, noise_scheduler = load_sd_components(
+        model_id=model_cfg["sd_model_id"],
         device=device,
+        use_gqir_qvae=model_cfg.get("use_gqir_qvae", False),
         dtype=torch.float16,
     )
 
-    # Upcast trainable params to fp32 for stable mixed-precision training.
-    # Frozen encoder stays in fp16 (saves memory), but trainable decoder +
-    # conv_in + mid_block are in fp32 so optimizer updates are precise.
+    # Upcast trainable params to fp32
     for p in unet.parameters():
         if p.requires_grad:
             p.data = p.data.float()
 
-    # ── Dataset with optional DistributedSampler ──────────────────────────
+    # ── Dataset ───────────────────────────────────────────────────────────
     ds_cfg = {
         "dataset_mode": "full",
         **{k: v for k, v in FULL_DATASET_CONFIG.items()},
@@ -166,12 +153,10 @@ def main() -> None:
         start_epoch = resume_state["epoch"] + 1
         global_step = resume_state.get("global_step", 0)
 
-        # Load trained weights directly into the UNet
         ckpt_path = os.path.join(save_dir, "unet.pth")
         state = torch.load(ckpt_path, map_location="cpu")
         unet.load_state_dict(state)
         del state
-        # Re-upcast trainable params (checkpoint has mixed fp32/fp16)
         for p in unet.parameters():
             if p.requires_grad:
                 p.data = p.data.float()
@@ -179,11 +164,7 @@ def main() -> None:
 
     # ── Wrap in DDP ───────────────────────────────────────────────────────
     if _is_distributed():
-        unet = DDP(
-            unet,
-            device_ids=[_local_rank()],
-            find_unused_parameters=False,  # No unused params with selective unfreeze
-        )
+        unet = DDP(unet, device_ids=[_local_rank()], find_unused_parameters=False)
 
     # ── Optimizer + scheduler ─────────────────────────────────────────────
     trainable_params = [p for p in unet.parameters() if p.requires_grad]
@@ -192,7 +173,7 @@ def main() -> None:
     accumulation = cfg["gradient_accumulation"]
     steps_per_epoch = len(dataloader) // accumulation
     total_steps = steps_per_epoch * cfg["num_epochs"]
-    warmup_steps = cfg.get("warmup_steps", 500)
+    warmup_steps = cfg.get("warmup_steps", 50)
 
     scheduler = _get_cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps)
 
@@ -200,7 +181,6 @@ def main() -> None:
         optimizer.load_state_dict(resume_state["optimizer"])
         if "scheduler" in resume_state:
             scheduler.load_state_dict(resume_state["scheduler"])
-        # Advance scheduler to the right step
         for _ in range(global_step):
             scheduler.step()
         if _is_main_process():
@@ -211,6 +191,12 @@ def main() -> None:
     # ── Training loop ─────────────────────────────────────────────────────
 
     num_train_timesteps = noise_scheduler.config.num_train_timesteps
+    is_v_prediction = noise_scheduler.config.prediction_type == "v_prediction"
+
+    if _is_main_process():
+        print(f"  v-prediction: {is_v_prediction}")
+        print(f"  Using gQIR qVAE: {meas_vae is not None}")
+        print(f"  Steps/epoch: {steps_per_epoch}, Total steps: {total_steps}")
 
     for epoch in range(start_epoch, cfg["num_epochs"]):
 
@@ -226,20 +212,19 @@ def main() -> None:
 
         for step, batch in enumerate(pbar):
 
-            measurement, target = batch
-
+            measurement_batch, target = batch
             if target is None:
                 continue
 
-            measurement = measurement.to(device, dtype=torch.float16)
+            measurement_batch = measurement_batch.to(device, dtype=torch.float16)
             target = target.to(device, dtype=torch.float16)
 
             # ── Encode to latent space ────────────────────────────────
             with torch.no_grad():
-                z_meas = encode_to_latent(vae, measurement, deterministic=True)
+                z_meas = encode_measurement(meas_vae, vae, measurement_batch)
                 z_target = encode_to_latent(vae, target, deterministic=False)
 
-            # ── Forward diffusion on target latent ────────────────────
+            # ── Forward diffusion ─────────────────────────────────────
             noise = torch.randn_like(z_target)
             timesteps = torch.randint(
                 0, num_train_timesteps, (z_target.shape[0],), device=device,
@@ -250,20 +235,25 @@ def main() -> None:
             # ── Palette: concatenate condition ────────────────────────
             z_input = torch.cat([z_noisy, z_meas], dim=1)
 
-            # ── Predict noise ─────────────────────────────────────────
+            # ── Compute target (auto v-prediction or epsilon) ─────────
+            if is_v_prediction:
+                target_pred = noise_scheduler.get_velocity(z_target, noise, timesteps)
+            else:
+                target_pred = noise
+
+            # ── Predict ───────────────────────────────────────────────
             with autocast(enabled=cfg["use_amp"]):
                 encoder_hidden_states = null_embeds.expand(
                     z_input.shape[0], -1, -1
                 )
 
-                # Call through DDP wrapper for correct gradient sync
-                noise_pred = unet(
+                model_pred = unet(
                     z_input,
                     timesteps,
                     encoder_hidden_states=encoder_hidden_states,
                 ).sample
 
-                loss = F.mse_loss(noise_pred, noise)
+                loss = F.mse_loss(model_pred, target_pred)
                 loss = loss / accumulation
 
             scaler.scale(loss).backward()

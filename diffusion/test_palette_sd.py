@@ -6,7 +6,7 @@ from diffusers import DDIMScheduler
 
 from config import SD_PALETTE_MODEL_CONFIG, RESTORATION_DATA_CONFIG, sd_palette_checkpoint_dir
 from dataset import get_restoration_dataloader
-from sd_utils import load_palette_sd, encode_to_latent, decode_from_latent
+from sd_utils import load_palette_sd, encode_measurement, decode_from_latent
 from eval_single import eval_image_pair
 from utils import save_comparison
 
@@ -17,11 +17,14 @@ def test_one():
     print(f"Device: {device}")
 
     model_id = SD_PALETTE_MODEL_CONFIG["sd_model_id"]
+    use_qvae = SD_PALETTE_MODEL_CONFIG.get("use_gqir_qvae", False)
     ckpt_dir = sd_palette_checkpoint_dir()
 
-    vae, unet, null_embeds = load_palette_sd(model_id, ckpt_dir, device)
+    meas_vae, vae, unet, null_embeds = load_palette_sd(
+        model_id, ckpt_dir, device, use_gqir_qvae=use_qvae,
+    )
     unet.eval()
-    print("Palette-SD model loaded.")
+    print(f"Palette-SD model loaded (qVAE: {meas_vae is not None}).")
 
     # Load one sample
     dataloader = get_restoration_dataloader(RESTORATION_DATA_CONFIG)
@@ -31,15 +34,15 @@ def test_one():
     print(f"Measurement range: [{measurement.min():.2f}, {measurement.max():.2f}]")
     print(f"Target range:      [{target.min():.2f}, {target.max():.2f}]")
 
-    # Encode measurement
-    z_meas = encode_to_latent(vae, measurement, deterministic=True)
+    # Encode measurement (uses qVAE if available, else standard VAE)
+    z_meas = encode_measurement(meas_vae, vae, measurement)
     print(f"Latent shape: {z_meas.shape}")
 
-    # DDIM with few steps for fast test
+    # DDIM (prediction type auto-detected from scheduler config)
     scheduler = DDIMScheduler.from_pretrained(model_id, subfolder="scheduler")
     num_steps = 50
     scheduler.set_timesteps(num_steps, device=device)
-    print(f"Running DDIM with {num_steps} steps...")
+    print(f"Running DDIM with {num_steps} steps (prediction: {scheduler.config.prediction_type})...")
 
     z = torch.randn_like(z_meas)
     encoder_hidden_states = null_embeds.expand(z.shape[0], -1, -1)
@@ -53,10 +56,11 @@ def test_one():
         ).sample
         z = scheduler.step(noise_pred, t, z, eta=0.0).prev_sample
 
+    # Decode with standard VAE
     restored = decode_from_latent(vae, z, original_size=(800, 800))
     print(f"Restored range:    [{restored.min():.2f}, {restored.max():.2f}]")
 
-    # Convert to [0,1] for eval_single (remove batch dim)
+    # Metrics
     gt_eval = ((target[0].float() + 1) / 2).clamp(0, 1)
     pred_eval = ((restored[0].float() + 1) / 2).clamp(0, 1)
 

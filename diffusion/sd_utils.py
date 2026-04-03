@@ -1,26 +1,19 @@
 """
 Shared utilities for Stable Diffusion latent Palette.
 
-Handles:
-  - Loading SD components (VAE, UNet, null text embeddings)
-  - Expanding UNet conv_in for Palette conditioning (4ch -> 8ch)
-  - Selectively unfreezing conv_in + mid_block + decoder for training
-  - Padding images to SD-compatible resolutions
-  - Encoding / decoding through the frozen VAE
-  - Saving / loading Palette-SD checkpoints
+Unified version supporting both:
+  - SD 1.5 (epsilon-prediction, standard VAE for all encoding)
+  - SD 2.1 (v-prediction, gQIR qVAE for measurement encoding)
 
-V2: Replaced LoRA-only fine-tuning with selective unfreezing.
-    The LoRA approach failed because gradients could not flow back
-    through the frozen encoder to update the zero-initialized conv_in
-    condition channels. Now conv_in, mid_block, and the full decoder
-    are trainable, giving ~340M params and a direct gradient path
-    from the loss to the conditioning input.
+The prediction type and qVAE usage are auto-detected from the config
+and model, so the training/inference scripts don't need to branch.
 """
 
 from __future__ import annotations
 
 import os
-from typing import Tuple
+import re
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -31,15 +24,14 @@ from transformers import CLIPTextModel, CLIPTokenizer
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-SD_VAE_FACTOR = 8       # VAE spatial downsampling factor
-SD_UNET_ALIGN = 8       # latent must be divisible by 2^(num_down_blocks)
+SD_VAE_FACTOR = 8
+SD_UNET_ALIGN = 8
 
 
 # ── Padding ──────────────────────────────────────────────────────────────────
 
 
 def _compute_pad(size: int) -> int:
-    """Pixels to add so that size / VAE_FACTOR is divisible by UNET_ALIGN."""
     latent = size // SD_VAE_FACTOR
     remainder = latent % SD_UNET_ALIGN
     if remainder == 0:
@@ -48,14 +40,6 @@ def _compute_pad(size: int) -> int:
 
 
 def pad_for_sd(x: torch.Tensor) -> Tuple[torch.Tensor, Tuple[int, int]]:
-    """
-    Reflection-pad (B,C,H,W) so H and W are SD-compatible.
-
-    For 800x800 images: pads to 832x832 (latent 104x104).
-
-    Returns:
-        (padded_tensor, original_size)
-    """
     _, _, h, w = x.shape
     pad_h = _compute_pad(h)
     pad_w = _compute_pad(w)
@@ -65,7 +49,6 @@ def pad_for_sd(x: torch.Tensor) -> Tuple[torch.Tensor, Tuple[int, int]]:
 
 
 def unpad(x: torch.Tensor, original_size: Tuple[int, int]) -> torch.Tensor:
-    """Crop decoded output back to the original spatial size."""
     h, w = original_size
     return x[:, :, :h, :w]
 
@@ -74,19 +57,10 @@ def unpad(x: torch.Tensor, original_size: Tuple[int, int]) -> torch.Tensor:
 
 
 def _expand_conv_in(unet: UNet2DConditionModel) -> None:
-    """
-    Expand UNet's conv_in from 4 -> 8 input channels in-place.
-
-    Copies pretrained weights to the first 4 channels and zero-inits
-    the new 4 channels (condition path).
-    """
     old = unet.conv_in
     new = nn.Conv2d(
-        8,
-        old.out_channels,
-        kernel_size=old.kernel_size,
-        stride=old.stride,
-        padding=old.padding,
+        8, old.out_channels,
+        kernel_size=old.kernel_size, stride=old.stride, padding=old.padding,
     )
     new.weight.data.zero_()
     new.weight.data[:, :4] = old.weight.data
@@ -98,33 +72,113 @@ def _expand_conv_in(unet: UNet2DConditionModel) -> None:
 
 
 def _selective_unfreeze(unet: UNet2DConditionModel) -> None:
-    """
-    Freeze encoder, unfreeze conv_in + mid_block + decoder + output.
-
-    This gives a direct gradient path from the MSE loss through the
-    decoder and mid_block back to conv_in, so the zero-initialized
-    condition channels can actually learn.
-
-    The encoder (down_blocks) stays frozen to preserve pretrained
-    feature extraction. Cross-attention layers in up_blocks are also
-    unfrozen, allowing the model to adapt how it uses the null
-    text embedding context.
-
-    Typical param count: ~340M trainable / ~860M total.
-    """
-    # First freeze everything
     unet.requires_grad_(False)
-
-    # Unfreeze: conv_in, mid_block, up_blocks (decoder), output layers
     for name, param in unet.named_parameters():
         if any(k in name for k in [
-            "conv_in",
-            "mid_block",
-            "up_blocks",
-            "conv_norm_out",
-            "conv_out",
+            "conv_in", "mid_block", "up_blocks", "conv_norm_out", "conv_out",
         ]):
             param.requires_grad = True
+
+
+# ── LDM → Diffusers VAE key conversion (for gQIR checkpoints) ───────────────
+
+NUM_DECODER_UP_BLOCKS = 4
+
+
+def convert_ldm_vae_keys(ldm_state_dict: dict) -> dict:
+    """Convert gQIR qVAE checkpoint (LDM format) to diffusers format."""
+    new_state = {}
+
+    for key, value in ldm_state_dict.items():
+        new_key = key
+
+        # Encoder down blocks
+        new_key = re.sub(
+            r"encoder\.down\.(\d+)\.block\.(\d+)",
+            r"encoder.down_blocks.\1.resnets.\2", new_key,
+        )
+        new_key = re.sub(
+            r"encoder\.down\.(\d+)\.downsample",
+            r"encoder.down_blocks.\1.downsamplers.0", new_key,
+        )
+
+        # Decoder up blocks (REVERSED: LDM up.0 = diffusers up_blocks.3)
+        def reverse_up_idx(m):
+            new_idx = NUM_DECODER_UP_BLOCKS - 1 - int(m.group(1))
+            return f"decoder.up_blocks.{new_idx}.{m.group(2)}"
+
+        new_key = re.sub(r"decoder\.up\.(\d+)\.(.*)", reverse_up_idx, new_key)
+        new_key = re.sub(
+            r"(decoder\.up_blocks\.\d+)\.block\.(\d+)",
+            r"\1.resnets.\2", new_key,
+        )
+        new_key = re.sub(
+            r"(decoder\.up_blocks\.\d+)\.upsample\.",
+            r"\1.upsamplers.0.", new_key,
+        )
+
+        # Mid blocks
+        new_key = re.sub(
+            r"(encoder|decoder)\.mid\.block_(\d+)",
+            lambda m: f"{m.group(1)}.mid_block.resnets.{int(m.group(2)) - 1}",
+            new_key,
+        )
+        new_key = re.sub(
+            r"(encoder|decoder)\.mid\.attn_1",
+            r"\1.mid_block.attentions.0", new_key,
+        )
+
+        # Attention layers
+        new_key = re.sub(r"\.q\.", ".to_q.", new_key)
+        new_key = re.sub(r"\.k\.", ".to_k.", new_key)
+        new_key = re.sub(r"\.v\.", ".to_v.", new_key)
+        new_key = re.sub(r"\.proj_out\.", ".to_out.0.", new_key)
+        new_key = re.sub(r"(attentions\.\d+)\.norm\.", r"\1.group_norm.", new_key)
+
+        # norm_out → conv_norm_out
+        new_key = re.sub(
+            r"(encoder|decoder)\.norm_out\.",
+            r"\1.conv_norm_out.", new_key,
+        )
+
+        # nin_shortcut → conv_shortcut
+        new_key = new_key.replace("nin_shortcut", "conv_shortcut")
+
+        # Squeeze attention Conv2d(1,1) → Linear
+        if any(a in new_key for a in [".to_q.", ".to_k.", ".to_v.", ".to_out.0."]):
+            if value.ndim == 4 and value.shape[2:] == (1, 1):
+                value = value.squeeze(-1).squeeze(-1)
+
+        new_state[new_key] = value
+
+    return new_state
+
+
+# ── Load gQIR qVAE ──────────────────────────────────────────────────────────
+
+
+def _load_gqir_qvae(
+    base_model_id: str,
+    device: torch.device,
+    dtype: torch.dtype = torch.float16,
+) -> AutoencoderKL:
+    """Download the gQIR 1-bit qVAE and load into a diffusers AutoencoderKL."""
+    from huggingface_hub import hf_hub_download
+
+    print("  Loading gQIR 1-bit qVAE ...")
+    ckpt_path = hf_hub_download(repo_id="aRy4n/gQIR", filename="1-bit/1965000.pt")
+
+    qvae = AutoencoderKL.from_pretrained(base_model_id, subfolder="vae", torch_dtype=dtype)
+
+    ldm_state = torch.load(ckpt_path, map_location="cpu")
+    diffusers_state = convert_ldm_vae_keys(ldm_state)
+    qvae.load_state_dict(diffusers_state, strict=True)
+
+    qvae.to(device)
+    qvae.eval()
+    qvae.requires_grad_(False)
+    print("  gQIR qVAE loaded.")
+    return qvae
 
 
 # ── Load / save ──────────────────────────────────────────────────────────────
@@ -133,24 +187,33 @@ def _selective_unfreeze(unet: UNet2DConditionModel) -> None:
 def load_sd_components(
     model_id: str,
     device: torch.device,
+    use_gqir_qvae: bool = False,
     dtype: torch.dtype = torch.float16,
 ):
     """
-    Load and prepare all SD components for Palette training.
+    Load all SD components for Palette training.
 
     Returns:
-        vae:             Frozen AutoencoderKL
+        meas_vae:        gQIR qVAE for measurements (or None if not using)
+        vae:             Standard VAE for targets + decoding (frozen)
         unet:            UNet with expanded conv_in, decoder unfrozen
-        null_embeds:     Pre-computed null text embedding for cross-attn
-        noise_scheduler: DDPMScheduler matching SD's pretrained schedule
+        null_embeds:     Null text embedding
+        noise_scheduler: DDPMScheduler (prediction type from model config)
     """
     print(f"Loading Stable Diffusion from {model_id} ...")
 
-    # ── VAE (frozen) ──
+    # ── Standard VAE (frozen) ──
     vae = AutoencoderKL.from_pretrained(model_id, subfolder="vae", torch_dtype=dtype)
     vae.to(device)
     vae.eval()
     vae.requires_grad_(False)
+
+    # ── Optional gQIR qVAE for measurements ──
+    meas_vae = None
+    if use_gqir_qvae:
+        meas_vae = _load_gqir_qvae(model_id, device, dtype)
+    else:
+        print("  Using standard VAE for measurements (no gQIR qVAE)")
 
     # ── UNet ──
     unet = UNet2DConditionModel.from_pretrained(
@@ -165,14 +228,15 @@ def load_sd_components(
     total = sum(p.numel() for p in unet.parameters())
     print(f"  UNet: {trainable:,} trainable / {total:,} total parameters")
 
-    # ── Null text embedding (computed once, then discard text encoder) ──
+    # ── Null text embedding ──
     null_embeds = _compute_null_embedding(model_id, device, dtype)
 
     # ── Noise scheduler ──
     noise_scheduler = DDPMScheduler.from_pretrained(model_id, subfolder="scheduler")
+    print(f"  Prediction type: {noise_scheduler.config.prediction_type}")
 
     print("  SD components loaded.")
-    return vae, unet, null_embeds, noise_scheduler
+    return meas_vae, vae, unet, null_embeds, noise_scheduler
 
 
 def _compute_null_embedding(
@@ -180,7 +244,6 @@ def _compute_null_embedding(
     device: torch.device,
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    """Build the null text embedding and discard the text encoder."""
     tokenizer = CLIPTokenizer.from_pretrained(model_id, subfolder="tokenizer")
     text_encoder = CLIPTextModel.from_pretrained(
         model_id, subfolder="text_encoder", torch_dtype=dtype,
@@ -195,26 +258,17 @@ def _compute_null_embedding(
             max_length=tokenizer.model_max_length,
             return_tensors="pt",
         ).input_ids.to(device)
-        null_embeds = text_encoder(null_ids)[0]  # (1, 77, hidden_dim)
+        null_embeds = text_encoder(null_ids)[0]
 
+    print(f"  Null embedding shape: {null_embeds.shape}")
     del text_encoder, tokenizer
     torch.cuda.empty_cache()
     return null_embeds
 
 
 def save_palette_sd(unet, save_dir: str) -> None:
-    """
-    Save the full UNet state dict (trainable + frozen weights).
-
-    We save everything rather than just trainable params to keep
-    the loading logic simple and avoid key-matching issues.
-    The checkpoint is ~1.7 GB in fp16.
-    """
     os.makedirs(save_dir, exist_ok=True)
-    torch.save(
-        unet.state_dict(),
-        os.path.join(save_dir, "unet.pth"),
-    )
+    torch.save(unet.state_dict(), os.path.join(save_dir, "unet.pth"))
     print(f"  Saved Palette-SD checkpoint to {save_dir}")
 
 
@@ -222,20 +276,24 @@ def load_palette_sd(
     model_id: str,
     save_dir: str,
     device: torch.device,
+    use_gqir_qvae: bool = False,
     dtype: torch.dtype = torch.float16,
 ):
     """
-    Load a trained Palette-SD model.
+    Load a trained Palette-SD model for inference.
 
     Returns:
-        vae, unet, null_embeds   (ready for inference)
+        meas_vae (or None), vae, unet, null_embeds
     """
     vae = AutoencoderKL.from_pretrained(model_id, subfolder="vae", torch_dtype=dtype)
     vae.to(device)
     vae.eval()
     vae.requires_grad_(False)
 
-    # Build UNet shell with expanded conv_in, then load trained weights
+    meas_vae = None
+    if use_gqir_qvae:
+        meas_vae = _load_gqir_qvae(model_id, device, dtype)
+
     unet = UNet2DConditionModel.from_pretrained(
         model_id, subfolder="unet", torch_dtype=dtype,
     )
@@ -249,7 +307,7 @@ def load_palette_sd(
 
     null_embeds = _compute_null_embedding(model_id, device, dtype)
 
-    return vae, unet, null_embeds
+    return meas_vae, vae, unet, null_embeds
 
 
 # ── Encode / decode helpers ──────────────────────────────────────────────────
@@ -261,15 +319,21 @@ def encode_to_latent(
     images: torch.Tensor,
     deterministic: bool = False,
 ) -> torch.Tensor:
-    """
-    Encode (B,3,H,W) images in [-1,1] to scaled latents.
-
-    Handles padding internally.  Returns (B,4,Hl,Wl) latents.
-    """
     x, _orig_size = pad_for_sd(images)
     posterior = vae.encode(x).latent_dist
     z = posterior.mode() if deterministic else posterior.sample()
     return z * vae.config.scaling_factor
+
+
+@torch.no_grad()
+def encode_measurement(
+    meas_vae: Optional[AutoencoderKL],
+    vae: AutoencoderKL,
+    measurement: torch.Tensor,
+) -> torch.Tensor:
+    """Encode measurement using qVAE if available, otherwise standard VAE."""
+    encoder = meas_vae if meas_vae is not None else vae
+    return encode_to_latent(encoder, measurement, deterministic=True)
 
 
 @torch.no_grad()
@@ -278,11 +342,6 @@ def decode_from_latent(
     latent: torch.Tensor,
     original_size: Tuple[int, int] = (800, 800),
 ) -> torch.Tensor:
-    """
-    Decode scaled latents to (B,3,H,W) images in [-1,1].
-
-    Handles un-padding to original_size.
-    """
     x = vae.decode(latent / vae.config.scaling_factor).sample
     x = unpad(x, original_size)
     return x.clamp(-1, 1)
