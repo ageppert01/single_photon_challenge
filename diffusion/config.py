@@ -170,7 +170,7 @@ SD_PALETTE_TRAIN_CONFIG = {
     "task_name": "single_photon_palette_sd",
 
     "batch_size": 6,
-    "num_epochs": 500,
+    "num_epochs": 2000,
     "lr": 5e-5,
     "num_workers": 2,
 
