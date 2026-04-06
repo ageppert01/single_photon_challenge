@@ -167,7 +167,7 @@ _SD_CONFIGS = {
 SD_PALETTE_MODEL_CONFIG = _SD_CONFIGS[SD_BACKBONE]
 
 SD_PALETTE_TRAIN_CONFIG = {
-    "task_name": "single_photon_palette_sd",
+    "task_name": "single_photon_palette_sd_v2",
 
     "batch_size": 6,
     "num_epochs": 2000,
@@ -180,12 +180,18 @@ SD_PALETTE_TRAIN_CONFIG = {
     "warmup_steps": 50,
 
     "seed": 42,
+
+    # ── Validation & best checkpoint ──────────────────────────────────────
+    "val_size": 185,               # ~10% hold-out for validation
+    "val_every_epochs": 100,       # run validation every N epochs
+    "val_num_steps": 20,           # DDIM steps for validation (fast)
+    "early_stopping_patience": 5,  # stop after N val rounds w/o improvement
 }
 
 SD_PALETTE_SAMPLE_CONFIG = {
     "num_steps": 50,
     "eta": 0.0,
-    "output_dir": "single_photon_palette_sd/restoration",
+    "output_dir": f"{SD_PALETTE_TRAIN_CONFIG['task_name']}/restoration",
 }
 
 
@@ -201,6 +207,10 @@ def palette_checkpoint_path() -> str:
 
 def sd_palette_checkpoint_dir() -> str:
     return f"{SD_PALETTE_TRAIN_CONFIG['task_name']}/checkpoint_{SD_BACKBONE}"
+
+
+def sd_palette_best_checkpoint_dir() -> str:
+    return f"{SD_PALETTE_TRAIN_CONFIG['task_name']}/checkpoint_{SD_BACKBONE}_best"
 
 
 def generated_samples_path(method: str) -> str:

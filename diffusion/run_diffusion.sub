@@ -65,7 +65,7 @@ request_disk = 60GB
 +WantGPULab = true
 
 # Can request "short", "medium", or "long"; default is "medium"
-+GPUJobLength = "short" 
++GPUJobLength = "long" 
 
 # Request certain range of capabilities
 #gpus_minimum_capability = <version>
