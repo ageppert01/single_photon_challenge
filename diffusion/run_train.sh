@@ -66,8 +66,8 @@ echo "===== START SD PALETTE TRAINING ====="
 torchrun --standalone --nproc_per_node="$NUM_GPUS" train_palette_sd.py
 echo "===== SD PALETTE TRAINING COMPLETE ====="
 
-echo "===== START SD PALETTE RESTORATION TEST ====="
-python test_palette_sd.py
+echo "===== START QUICK RESTORATION TEST ====="
+python evaluate.py --quick
 echo "===== RESTORATION TEST COMPLETE ====="
 
 echo "===== JOB FINISHED ====="

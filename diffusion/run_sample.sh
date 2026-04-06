@@ -21,17 +21,13 @@ export HF_TOKEN="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"
 echo "Installing Python dependencies"
 python -m pip install --no-cache-dir -r requirements.txt
 
-# Number of GPUs — auto-detect or override with NUM_GPUS env var
-NUM_GPUS="${NUM_GPUS:-$(python -c 'import torch; print(torch.cuda.device_count())')}"
-echo "Using $NUM_GPUS GPU(s)"
+echo "===== QUICK RESTORATION TEST ====="
+python evaluate.py --quick
+echo "===== QUICK TEST COMPLETE ====="
 
-echo "===== START SD PALETTE RESTORATION TEST ====="
-python test_palette_sd.py
-echo "===== RESTORATION TEST COMPLETE ====="
-
-echo "===== START SD PALETTE RESTORATION + EVALUATION ====="
-#python sample_palette_sd.py
-echo "===== RESTORATION COMPLETE ====="
+echo "===== FULL RESTORATION + EVALUATION ====="
+python evaluate.py --best
+echo "===== FULL EVALUATION COMPLETE ====="
 
 echo "===== JOB FINISHED ====="
 date
