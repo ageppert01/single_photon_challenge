@@ -10,8 +10,6 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 from huggingface_hub import snapshot_download
 
-from photoncube_preprocess import photoncube_file_to_tensor
-
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -58,83 +56,7 @@ def _load_png(path: Path) -> Tensor:
     return tensor * 2 - 1
 
 
-# ── Sample dataset: ground-truth PNGs only (unconditional training) ──────────
-
-
-class SinglePhotonGroundTruthDataset(Dataset[Tensor]):
-    """
-    Loads ground-truth RGB PNG images from the small sample dataset.
-    Returns a single tensor per sample (no measurements).
-    """
-
-    def __init__(self, root_dir: Path) -> None:
-        self.root_dir = root_dir
-        self.image_paths = sorted(self.root_dir.rglob("*.png"))
-
-        if not self.image_paths:
-            raise RuntimeError(f"No PNG files found in dataset: {self.root_dir}")
-
-    def __len__(self) -> int:
-        return len(self.image_paths)
-
-    def __getitem__(self, index: int) -> Tensor:
-        return _load_png(self.image_paths[index])
-
-
-# ── Sample dataset: photoncube + ground-truth pairs (restoration) ────────────
-
-
-class SinglePhotonRestorationDataset(Dataset):
-    """
-    Paired dataset for the sample data: raw photoncube .npy + ground-truth PNG.
-    """
-
-    def __init__(
-        self,
-        source: str,
-        local_dir: str,
-        hf_repo: str,
-        hf_revision: str,
-        num_frames: int = 16,
-        invert_response: bool = True,
-        invert_factor: float = 0.5,
-        tonemap: bool = True,
-    ):
-        self.root_dir = resolve_dataset_root(source, local_dir, hf_repo, hf_revision)
-
-        self.num_frames = num_frames
-        self.invert_response = invert_response
-        self.invert_factor = invert_factor
-        self.tonemap = tonemap
-
-        self.samples: list[Tuple[Path, Path]] = []
-        for npy_path in sorted(self.root_dir.rglob("*.npy")):
-            png_path = npy_path.with_suffix(".png")
-            if png_path.exists():
-                self.samples.append((npy_path, png_path))
-
-        if len(self.samples) == 0:
-            raise RuntimeError(f"No paired samples found in {self.root_dir}")
-
-    def __len__(self) -> int:
-        return len(self.samples)
-
-    def __getitem__(self, idx: int) -> Tuple[Tensor, Tensor]:
-        npy_path, png_path = self.samples[idx]
-
-        measurement = photoncube_file_to_tensor(
-            str(npy_path),
-            num_frames=self.num_frames,
-            invert_response=self.invert_response,
-            invert_factor=self.invert_factor,
-            tonemap=self.tonemap,
-        )
-        target = _load_png(png_path)
-
-        return measurement, target
-
-
-# ── Full preprocessed dataset: measurement/target PNG pairs ──────────────────
+# ── Preprocessed dataset: measurement/target PNG pairs ───────────────────────
 
 
 class PreprocessedPairedDataset(Dataset):
@@ -203,138 +125,35 @@ class PreprocessedPairedDataset(Dataset):
         return measurement, target
 
 
-# ── Unified dataset / dataloader factories ───────────────────────────────────
+# ── Dataset / dataloader factories ───────────────────────────────────────────
 
 
 def get_training_dataset(config: dict) -> Dataset:
     """
-    Return the training Dataset based on the dataset mode in *config*.
+    Return the training Dataset.
 
     Use this when you need the raw Dataset (e.g. to attach a
     DistributedSampler for DDP training).
-
-    - "sample" mode: SinglePhotonGroundTruthDataset (tensor per sample).
-    - "full" mode: PreprocessedPairedDataset (measurement, target) tuples.
     """
-    mode = config["dataset_mode"]
-
-    if mode == "sample":
-        root = resolve_dataset_root(
-            config["dataset_source"],
-            config["dataset_local_dir"],
-            config["dataset_hf_repo"],
-            config["dataset_hf_revision"],
-        )
-        return SinglePhotonGroundTruthDataset(root)
-
-    elif mode == "full":
-        return PreprocessedPairedDataset(
-            source=config["dataset_source"],
-            local_dir=config.get("dataset_local_dir"),
-            hf_repo=config.get("dataset_hf_repo"),
-            hf_revision=config.get("dataset_hf_revision"),
-            split="train",
-        )
-
-    else:
-        raise ValueError(f"Unknown dataset_mode: {mode!r}")
-
-
-def get_training_dataloader(config: dict) -> DataLoader:
-    """
-    Convenience wrapper: build dataset + single-process DataLoader.
-
-    For DDP, use get_training_dataset() and construct the DataLoader
-    yourself with a DistributedSampler.
-    """
-    dataset = get_training_dataset(config)
-
-    return DataLoader(
-        dataset,
-        batch_size=config["batch_size"],
-        shuffle=True,
-        num_workers=config["num_workers"],
-        pin_memory=torch.cuda.is_available(),
+    return PreprocessedPairedDataset(
+        source=config["dataset_source"],
+        local_dir=config.get("dataset_local_dir"),
+        hf_repo=config.get("dataset_hf_repo"),
+        hf_revision=config.get("dataset_hf_revision"),
+        split="train",
     )
 
 
 def get_restoration_dataloader(config: dict) -> DataLoader:
-    """
-    Return a restoration DataLoader (measurement + target pairs).
-
-    - "sample" mode: preprocesses raw photoncubes on-the-fly.
-    - "full" mode: loads preprocessed PNG pairs from the requested split.
-    """
-    mode = config["dataset_mode"]
-
-    if mode == "sample":
-        dataset = SinglePhotonRestorationDataset(
-            source=config["dataset_source"],
-            local_dir=config["dataset_local_dir"],
-            hf_repo=config["dataset_hf_repo"],
-            hf_revision=config["dataset_hf_revision"],
-            num_frames=config["num_frames"],
-            invert_response=config["invert_response"],
-            invert_factor=config["invert_factor"],
-            tonemap=config["tonemap"],
-        )
-
-    elif mode == "full":
-        dataset = PreprocessedPairedDataset(
-            source=config["dataset_source"],
-            local_dir=config.get("dataset_local_dir"),
-            hf_repo=config.get("dataset_hf_repo"),
-            hf_revision=config.get("dataset_hf_revision"),
-            split=config.get("split", "train"),
-        )
-
-    else:
-        raise ValueError(f"Unknown dataset_mode: {mode!r}")
-
-    return DataLoader(
-        dataset,
-        batch_size=config["batch_size"],
-        shuffle=False,
-        num_workers=config["num_workers"],
-    )
-
-
-# ── Legacy aliases (kept for backward compatibility) ─────────────────────────
-
-
-def get_single_photon_dataloader(
-    batch_size: int,
-    source: str,
-    local_dir: Optional[str],
-    hf_repo: Optional[str],
-    hf_revision: Optional[str],
-    shuffle: bool,
-    num_workers: int,
-) -> DataLoader:
-    """Legacy entry point — delegates to SinglePhotonGroundTruthDataset."""
-    root = resolve_dataset_root(source, local_dir, hf_repo, hf_revision)
-    dataset = SinglePhotonGroundTruthDataset(root)
-    return DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=shuffle,
-        num_workers=num_workers,
-        pin_memory=torch.cuda.is_available(),
-    )
-
-
-def get_single_photon_restoration_dataloader(config: dict) -> DataLoader:
-    """Legacy entry point — delegates to SinglePhotonRestorationDataset."""
-    dataset = SinglePhotonRestorationDataset(
+    """Return a restoration DataLoader (measurement + target pairs)."""
+    dataset = PreprocessedPairedDataset(
         source=config["dataset_source"],
-        local_dir=config["dataset_local_dir"],
-        hf_repo=config["dataset_hf_repo"],
-        hf_revision=config["dataset_hf_revision"],
-        num_frames=config["num_frames"],
-        invert_response=config["invert_response"],
-        invert_factor=config["invert_factor"],
-        tonemap=config["tonemap"],
+        local_dir=config.get("dataset_local_dir"),
+        hf_repo=config.get("dataset_hf_repo"),
+        hf_revision=config.get("dataset_hf_revision"),
+        split=config.get("split", "train"),
     )
+
     return DataLoader(
         dataset,
         batch_size=config["batch_size"],

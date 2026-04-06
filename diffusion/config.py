@@ -69,7 +69,7 @@ SD_PALETTE_TRAIN_CONFIG = {
 
     # ── Validation & best checkpoint ──────────────────────────────────────
     "val_size": 185,               # ~10% hold-out for validation
-    "val_every_epochs": 100,       # run validation every N epochs
+    "val_every_epochs": 20,        # run validation every N epochs
     "val_num_steps": 20,           # DDIM steps for validation (fast)
     "early_stopping_patience": 5,  # stop after N val rounds w/o improvement
 }
