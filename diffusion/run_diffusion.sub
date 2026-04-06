@@ -20,6 +20,7 @@ universe = container
 #  commands) and arguments to be passed to jobs. 
 #  $(Process) will be a integer number for each job, starting with "0"
 #  and increasing for the relevant number of jobs.
+environment = "HF_TOKEN=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"
 executable = run_train.sh
 arguments = $(Process)
 

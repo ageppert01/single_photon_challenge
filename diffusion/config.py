@@ -15,11 +15,7 @@ FULL_DATASET_CONFIG = {
 }
 
 RESTORATION_DATA_CONFIG = {
-    "dataset_mode": "full",
-    "dataset_source": FULL_DATASET_CONFIG["dataset_source"],
-    "dataset_local_dir": FULL_DATASET_CONFIG["dataset_local_dir"],
-    "dataset_hf_repo": FULL_DATASET_CONFIG["dataset_hf_repo"],
-    "dataset_hf_revision": FULL_DATASET_CONFIG["dataset_hf_revision"],
+    **FULL_DATASET_CONFIG,
     "split": "train",
     "batch_size": 1,
     "num_workers": 4,

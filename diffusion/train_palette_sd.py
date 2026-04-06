@@ -207,8 +207,7 @@ def main() -> None:
 
     # ── Dataset ───────────────────────────────────────────────────────────
     ds_cfg = {
-        "dataset_mode": "full",
-        **{k: v for k, v in FULL_DATASET_CONFIG.items()},
+        **FULL_DATASET_CONFIG,
         "batch_size": cfg["batch_size"],
         "num_workers": cfg["num_workers"],
     }
