@@ -2,11 +2,10 @@
 
 import os
 import torch
-from diffusers import DDIMScheduler
 
 from config import SD_PALETTE_MODEL_CONFIG, RESTORATION_DATA_CONFIG, sd_palette_checkpoint_dir
 from dataset import get_restoration_dataloader
-from sd_utils import load_palette_sd, encode_measurement, decode_from_latent
+from sd_utils import load_palette_sd, sd_palette_inference
 from eval_single import eval_image_pair
 from utils import save_comparison
 
@@ -34,30 +33,19 @@ def test_one():
     print(f"Measurement range: [{measurement.min():.2f}, {measurement.max():.2f}]")
     print(f"Target range:      [{target.min():.2f}, {target.max():.2f}]")
 
-    # Encode measurement (uses qVAE if available, else standard VAE)
-    z_meas = encode_measurement(meas_vae, vae, measurement)
-    print(f"Latent shape: {z_meas.shape}")
-
-    # DDIM (prediction type auto-detected from scheduler config)
-    scheduler = DDIMScheduler.from_pretrained(model_id, subfolder="scheduler")
+    # Run inference
     num_steps = 50
-    scheduler.set_timesteps(num_steps, device=device)
-    print(f"Running DDIM with {num_steps} steps (prediction: {scheduler.config.prediction_type})...")
-
-    z = torch.randn_like(z_meas)
-    encoder_hidden_states = null_embeds.expand(z.shape[0], -1, -1)
-
-    for t in scheduler.timesteps:
-        z_input = torch.cat([z, z_meas], dim=1)
-        noise_pred = unet(
-            z_input,
-            t.unsqueeze(0).expand(z.shape[0]),
-            encoder_hidden_states=encoder_hidden_states,
-        ).sample
-        z = scheduler.step(noise_pred, t, z, eta=0.0).prev_sample
-
-    # Decode with standard VAE
-    restored = decode_from_latent(vae, z, original_size=(800, 800))
+    print(f"Running DDIM with {num_steps} steps...")
+    restored = sd_palette_inference(
+        unet=unet,
+        meas_vae=meas_vae,
+        vae=vae,
+        null_embeds=null_embeds,
+        measurement=measurement,
+        model_id=model_id,
+        device=device,
+        num_steps=num_steps,
+    )
     print(f"Restored range:    [{restored.min():.2f}, {restored.max():.2f}]")
 
     # Metrics

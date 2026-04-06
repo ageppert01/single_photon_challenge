@@ -18,7 +18,8 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from diffusers import AutoencoderKL, UNet2DConditionModel, DDPMScheduler
+from diffusers import AutoencoderKL, UNet2DConditionModel, DDPMScheduler, DDIMScheduler
+from torch.cuda.amp import autocast
 from transformers import CLIPTextModel, CLIPTokenizer
 
 
@@ -345,3 +346,64 @@ def decode_from_latent(
     x = vae.decode(latent / vae.config.scaling_factor).sample
     x = unpad(x, original_size)
     return x.clamp(-1, 1)
+
+
+# ── Inference ────────────────────────────────────────────────────────────────
+
+
+@torch.no_grad()
+def sd_palette_inference(
+    unet: UNet2DConditionModel,
+    meas_vae: Optional[AutoencoderKL],
+    vae: AutoencoderKL,
+    null_embeds: torch.Tensor,
+    measurement: torch.Tensor,
+    model_id: str,
+    device: torch.device,
+    num_steps: int = 50,
+    eta: float = 0.0,
+) -> torch.Tensor:
+    """
+    Run Palette-SD DDIM inference on a single measurement batch.
+
+    Handles encoding, the full reverse diffusion loop (with autocast for
+    mixed-precision safety), and decoding back to pixel space.
+
+    Args:
+        unet:         Palette UNet (8-channel conv_in: noisy + condition)
+        meas_vae:     gQIR qVAE for measurements (or None to use standard VAE)
+        vae:          Standard SD VAE for decoding
+        null_embeds:  Null text embedding
+        measurement:  Input measurement in [-1, 1], shape (B, 3, H, W), fp16
+        model_id:     HuggingFace model ID (for loading the scheduler config)
+        device:       Torch device
+        num_steps:    Number of DDIM denoising steps
+        eta:          DDIM stochasticity (0 = deterministic)
+
+    Returns:
+        Restored image in [-1, 1], shape (B, 3, 800, 800)
+    """
+    # Encode measurement to latent space
+    z_meas = encode_measurement(meas_vae, vae, measurement)
+
+    # Set up DDIM scheduler (prediction type auto-detected from config)
+    scheduler = DDIMScheduler.from_pretrained(model_id, subfolder="scheduler")
+    scheduler.set_timesteps(num_steps, device=device)
+
+    # Start from pure noise
+    z = torch.randn_like(z_meas)
+    encoder_hidden_states = null_embeds.expand(z.shape[0], -1, -1)
+
+    # Reverse diffusion
+    for t in scheduler.timesteps:
+        z_input = torch.cat([z, z_meas], dim=1)
+        with autocast(enabled=True):
+            noise_pred = unet(
+                z_input,
+                t.unsqueeze(0).expand(z.shape[0]),
+                encoder_hidden_states=encoder_hidden_states,
+            ).sample
+        z = scheduler.step(noise_pred, t, z, eta=eta).prev_sample
+
+    # Decode back to pixel space
+    return decode_from_latent(vae, z, original_size=(800, 800))

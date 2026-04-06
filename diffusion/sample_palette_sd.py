@@ -8,7 +8,6 @@ import statistics
 
 import torch
 from tqdm import tqdm
-from diffusers import DDIMScheduler
 
 from config import (
     SD_PALETTE_MODEL_CONFIG,
@@ -17,7 +16,7 @@ from config import (
     sd_palette_checkpoint_dir,
 )
 from dataset import get_restoration_dataloader
-from sd_utils import load_palette_sd, encode_measurement, decode_from_latent
+from sd_utils import load_palette_sd, sd_palette_inference
 from eval_single import eval_image_pair
 from utils import save_comparison
 
@@ -44,12 +43,9 @@ def run_sd_palette():
     unet.eval()
     print(f"Palette-SD model loaded (qVAE: {meas_vae is not None}).")
 
-    # DDIM (prediction type auto-detected)
-    scheduler = DDIMScheduler.from_pretrained(model_id, subfolder="scheduler")
     num_steps = SD_PALETTE_SAMPLE_CONFIG["num_steps"]
     eta = SD_PALETTE_SAMPLE_CONFIG["eta"]
-    scheduler.set_timesteps(num_steps, device=device)
-    print(f"DDIM: {num_steps} steps, eta={eta}, prediction={scheduler.config.prediction_type}")
+    print(f"DDIM: {num_steps} steps, eta={eta}")
 
     dataloader = get_restoration_dataloader(RESTORATION_DATA_CONFIG)
 
@@ -70,24 +66,17 @@ def run_sd_palette():
 
             measurement = measurement.to(device, dtype=torch.float16)
 
-            # Encode measurement (qVAE if available, else standard VAE)
-            z_meas = encode_measurement(meas_vae, vae, measurement)
-
-            # Reverse diffusion
-            z = torch.randn_like(z_meas)
-            encoder_hidden_states = null_embeds.expand(z.shape[0], -1, -1)
-
-            for t in scheduler.timesteps:
-                z_input = torch.cat([z, z_meas], dim=1)
-                noise_pred = unet(
-                    z_input,
-                    t.unsqueeze(0).expand(z.shape[0]),
-                    encoder_hidden_states=encoder_hidden_states,
-                ).sample
-                z = scheduler.step(noise_pred, t, z, eta=eta).prev_sample
-
-            # Decode with standard VAE
-            restored = decode_from_latent(vae, z, original_size=(800, 800))
+            restored = sd_palette_inference(
+                unet=unet,
+                meas_vae=meas_vae,
+                vae=vae,
+                null_embeds=null_embeds,
+                measurement=measurement,
+                model_id=model_id,
+                device=device,
+                num_steps=num_steps,
+                eta=eta,
+            )
 
             # Evaluate
             if target is not None:

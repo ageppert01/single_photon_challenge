@@ -23,7 +23,6 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
-from diffusers import DDIMScheduler
 
 from config import (
     DEVICE,
@@ -38,7 +37,7 @@ from sd_utils import (
     save_palette_sd,
     encode_to_latent,
     encode_measurement,
-    decode_from_latent,
+    sd_palette_inference,
 )
 from eval_single import eval_image_pair
 from utils import ensure_dir, seed_everything
@@ -128,9 +127,6 @@ def _validate(
     """
     unet.eval()
 
-    scheduler = DDIMScheduler.from_pretrained(model_id, subfolder="scheduler")
-    scheduler.set_timesteps(num_steps, device=device)
-
     all_psnr, all_msssim, all_lpips = [], [], []
 
     for measurement, target in tqdm(val_dataloader, desc="Validation"):
@@ -138,23 +134,17 @@ def _validate(
             continue
 
         measurement = measurement.to(device, dtype=torch.float16)
-        z_meas = encode_measurement(meas_vae, vae, measurement)
 
-        # Reverse diffusion from noise
-        z = torch.randn_like(z_meas)
-        enc_hidden = null_embeds.expand(z.shape[0], -1, -1)
-
-        for t in scheduler.timesteps:
-            z_input = torch.cat([z, z_meas], dim=1)
-            with autocast(enabled=True):
-                pred = unet(
-                    z_input,
-                    t.unsqueeze(0).expand(z.shape[0]),
-                    encoder_hidden_states=enc_hidden,
-                ).sample
-            z = scheduler.step(pred, t, z, eta=0.0).prev_sample
-
-        restored = decode_from_latent(vae, z, original_size=(800, 800))
+        restored = sd_palette_inference(
+            unet=unet,
+            meas_vae=meas_vae,
+            vae=vae,
+            null_embeds=null_embeds,
+            measurement=measurement,
+            model_id=model_id,
+            device=device,
+            num_steps=num_steps,
+        )
 
         # Convert [-1, 1] → [0, 1] for metrics
         gt_eval = ((target[0].float() + 1) / 2).clamp(0, 1)
