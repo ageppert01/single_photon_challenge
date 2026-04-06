@@ -4,6 +4,4 @@
 
 *.pth
 
-*.sub
-
 diffusion/single_photon_palette/restoration/*.png
