@@ -16,7 +16,7 @@ echo "===== ENVIRONMENT SETUP ====="
 export HF_HOME="$PWD/hf_cache"
 export HUGGINGFACE_HUB_CACHE="$PWD/hf_cache"
 mkdir -p "$HF_HOME"
-HF_TOKEN="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"
+#HF_TOKEN="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"
 
 echo "Installing Python dependencies"
 python -m pip install --no-cache-dir -r requirements.txt

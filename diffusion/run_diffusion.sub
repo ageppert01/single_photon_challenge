@@ -38,10 +38,11 @@ transfer_input_files = \
     evaluate.py, \
     run_train.sh, \
     requirements.txt, \
-    single_photon_palette_sd_v2
+    single_photon_palette_sd_v2, \
+    hf_cache
 
 # Only transfer checkpoint dir back
-transfer_output_files = single_photon_palette_sd_v2
+transfer_output_files = single_photon_palette_sd_v2, hf_cache
 when_to_transfer_output = ON_EXIT
 
 ##########################################
