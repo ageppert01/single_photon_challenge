@@ -10,7 +10,7 @@ universe = container
 
 ##########################################
 ############# Script to Run ##############
-environment = "HF_TOKEN=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"
+#environment = "HF_TOKEN=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"
 executable = run_sample.sh
 arguments = $(Process)
 

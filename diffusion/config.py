@@ -30,7 +30,7 @@ RESTORATION_DATA_CONFIG = {
 #   "sd21_gqir"  - SD 2.1-zsnr, v-prediction, gQIR qVAE for measurements
 # ══════════════════════════════════════════════════════════════════════════════
 
-SD_BACKBONE = "sd21_gqir"  # ← change this to switch
+SD_BACKBONE = "sd21_gqir"
 
 _SD_CONFIGS = {
     "sd15": {
@@ -66,7 +66,7 @@ SD_PALETTE_TRAIN_CONFIG = {
     # ── Validation & best checkpoint ──────────────────────────────────────
     "val_size": 185,               # ~10% hold-out for validation
     "val_every_epochs": 20,        # run validation every N epochs
-    "val_num_steps": 20,           # DDIM steps for validation (fast)
+    "val_num_steps": 50,           # DDIM steps for validation (fast)
     "early_stopping_patience": 5,  # stop after N val rounds w/o improvement
 }
 
@@ -74,7 +74,7 @@ SD_PALETTE_TRAIN_CONFIG = {
 # ── Sampling / evaluation ────────────────────────────────────────────────────
 
 SD_PALETTE_SAMPLE_CONFIG = {
-    "num_steps": 50,
+    "num_steps": 1000,
     "eta": 0.0,
     "output_dir": f"{SD_PALETTE_TRAIN_CONFIG['task_name']}/restoration",
 }
