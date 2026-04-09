@@ -11,7 +11,7 @@ echo "Downloading dataset and models..."
 python -c "
 from config import FULL_DATASET_CONFIG, SD_PALETTE_MODEL_CONFIG
 from dataset import resolve_dataset_root
-from diffusers import AutoencoderKL, UNet2DConditionModel
+from diffusers import AutoencoderKL, UNet2DConditionModel, DDPMScheduler
 from transformers import CLIPTextModel, CLIPTokenizer
 
 resolve_dataset_root(
@@ -27,6 +27,7 @@ AutoencoderKL.from_pretrained(model_id, subfolder='vae')
 UNet2DConditionModel.from_pretrained(model_id, subfolder='unet')
 CLIPTokenizer.from_pretrained(model_id, subfolder='tokenizer')
 CLIPTextModel.from_pretrained(model_id, subfolder='text_encoder')
+DDPMScheduler.from_pretrained(model_id, subfolder='scheduler')
 print('SD model cached.')
 
 if SD_PALETTE_MODEL_CONFIG.get('use_gqir_qvae', False):

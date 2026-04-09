@@ -42,7 +42,7 @@ transfer_input_files = \
     hf_cache
 
 # Only transfer checkpoint dir back
-transfer_output_files = single_photon_palette_sd_v2, hf_cache
+transfer_output_files = single_photon_palette_sd_v2
 when_to_transfer_output = ON_EXIT
 
 ##########################################
