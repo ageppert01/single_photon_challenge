@@ -35,10 +35,14 @@ def generate_readme(dataset_dir: Path, repo_id: str) -> None:
     else:
         meta = {}
 
-    num_frames = meta.get("num_frames", "unknown")
-    invert_response = meta.get("invert_response", "unknown")
-    invert_factor = meta.get("invert_factor", "unknown")
-    tonemap = meta.get("tonemap", "unknown")
+    K = meta.get("K", "unknown")
+    reg_block_size = meta.get("reg_block_size", "unknown")
+    overlap_threshold = meta.get("overlap_threshold", "unknown")
+    use_dense_flow = meta.get("use_dense_flow", "unknown")
+    flow_attachment = meta.get("flow_attachment", "unknown")
+    flow_tightness = meta.get("flow_tightness", "unknown")
+    num_warp = meta.get("num_warp", "unknown")
+    scale_candidates = meta.get("scale_candidates", "unknown")
 
     # Count samples per split
     train_count = len(list(dataset_dir.glob("train/**/*_measurement.png")))
@@ -76,14 +80,22 @@ RGB reconstructions.
 
 ## Preprocessing pipeline
 
-Each photoncube was preprocessed using the same approach as the
-[challenge FAQ naive sum](https://singlephotonchallenge.com/faq):
+Each photoncube was preprocessed using **adaptive similarity-flow-sum
+registration**:
 
-1. **Average** the last {num_frames} binary frames → detection probability in [0, 1]
-2. **Invert SPC response** (`invert_response={invert_response}`, `factor={invert_factor}`)
-   → linear RGB flux via `flux = -log(1 - p) / factor`
-3. **sRGB tonemap** (`tonemap={tonemap}`) → standard gamma curve
-4. **Save** as uint8 PNG
+1. **Unpack** the last {K} binary frames from each photoncube
+2. **Partition** frames into non-overlapping registration blocks of size {reg_block_size}
+3. **Register** each block to the reference (last block) using global
+   scale+translation search over candidates `{scale_candidates}` with
+   phase cross-correlation (overlap threshold = {overlap_threshold})
+4. **Refine** alignment with dense TVL1 optical flow
+   (`use_dense_flow={use_dense_flow}`, `attachment={flow_attachment}`,
+   `tightness={flow_tightness}`, `num_warp={num_warp}`)
+5. **Warp and accumulate** all frames per accepted block with per-pixel
+   validity masking
+6. **Invert SPC response** → linear RGB flux via `flux = -log(1 - p) / 0.5`
+7. **sRGB tonemap** → standard gamma curve
+8. **Save** as uint8 PNG
 
 Measurements and targets are stored as 800×800 RGB PNGs.
 

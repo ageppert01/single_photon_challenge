@@ -19,7 +19,7 @@ mkdir -p "$HF_HOME"
 export PATH="$HOME/.local/bin:$PATH"
 
 echo "Installing Python dependencies"
-python -m pip install --no-cache-dir numpy Pillow awscli huggingface_hub
+python -m pip install --no-cache-dir numpy Pillow scipy scikit-image awscli huggingface_hub
 
 # Install 7z (static binary) if not already available
 if ! which 7z &>/dev/null && ! which 7zz &>/dev/null; then
@@ -49,8 +49,14 @@ aws --version
 OUTPUT_DIR="$PWD/preprocessed"
 
 SPLIT="${SPLIT:-}"
-NUM_FRAMES="${NUM_FRAMES:-16}"
-INVERT_FACTOR="${INVERT_FACTOR:-0.5}"
+K="${K:-256}"
+REG_BLOCK_SIZE="${REG_BLOCK_SIZE:-8}"
+OVERLAP_THRESHOLD="${OVERLAP_THRESHOLD:-0.45}"
+USE_DENSE_FLOW="${USE_DENSE_FLOW:-true}"
+FLOW_ATTACHMENT="${FLOW_ATTACHMENT:-15}"
+FLOW_TIGHTNESS="${FLOW_TIGHTNESS:-0.3}"
+NUM_WARP="${NUM_WARP:-5}"
+NUM_WORKERS="${NUM_WORKERS:-0}"
 
 # Upload is required — HF is how the data survives after the job ends
 REPO_ID="${REPO_ID:?ERROR: REPO_ID not set. Example: your-username/spc-preprocessed}"
@@ -59,11 +65,17 @@ PRIVATE="${PRIVATE:-false}"
 
 export HUGGING_FACE_HUB_TOKEN="$HF_TOKEN"
 
-echo "OUTPUT_DIR:    $OUTPUT_DIR (local scratch, ephemeral)"
-echo "SPLIT:         ${SPLIT:-all}"
-echo "NUM_FRAMES:    $NUM_FRAMES"
-echo "INVERT_FACTOR: $INVERT_FACTOR"
-echo "REPO_ID:       $REPO_ID"
+echo "OUTPUT_DIR:         $OUTPUT_DIR (local scratch, ephemeral)"
+echo "SPLIT:              ${SPLIT:-all}"
+echo "K:                  $K"
+echo "REG_BLOCK_SIZE:     $REG_BLOCK_SIZE"
+echo "OVERLAP_THRESHOLD:  $OVERLAP_THRESHOLD"
+echo "USE_DENSE_FLOW:     $USE_DENSE_FLOW"
+echo "FLOW_ATTACHMENT:    $FLOW_ATTACHMENT"
+echo "FLOW_TIGHTNESS:     $FLOW_TIGHTNESS"
+echo "NUM_WARP:           $NUM_WARP"
+echo "NUM_WORKERS:        $NUM_WORKERS"
+echo "REPO_ID:            $REPO_ID"
 
 # ── Preprocess ────────────────────────────────────────────────────────────────
 
@@ -72,12 +84,23 @@ if [ -n "$SPLIT" ]; then
     SPLIT_ARG="--split $SPLIT"
 fi
 
+DENSE_FLOW_ARG=""
+if [ "$USE_DENSE_FLOW" = "false" ]; then
+    DENSE_FLOW_ARG="--no-dense-flow"
+fi
+
 echo "===== START PREPROCESSING ====="
 python preprocess_full_dataset.py \
     --output-dir "$OUTPUT_DIR" \
     --scratch-dir "$PWD/_scratch" \
-    --num-frames "$NUM_FRAMES" \
-    --invert-factor "$INVERT_FACTOR" \
+    --K "$K" \
+    --reg-block-size "$REG_BLOCK_SIZE" \
+    --overlap-threshold "$OVERLAP_THRESHOLD" \
+    --flow-attachment "$FLOW_ATTACHMENT" \
+    --flow-tightness "$FLOW_TIGHTNESS" \
+    --num-warp "$NUM_WARP" \
+    --num-workers "$NUM_WORKERS" \
+    $DENSE_FLOW_ARG \
     $SPLIT_ARG
 
 echo "===== PREPROCESSING COMPLETE ====="
