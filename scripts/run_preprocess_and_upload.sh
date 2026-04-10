@@ -21,26 +21,17 @@ export PATH="$HOME/.local/bin:$PATH"
 echo "Installing Python dependencies"
 python -m pip install --no-cache-dir numpy Pillow scipy scikit-image awscli huggingface_hub
 
-# Install 7z (static binary) if not already available
+# Python's zipfile handles most LZMA zips natively.
+# Install p7zip as fallback in case Python's lzma support is incomplete.
 if ! which 7z &>/dev/null && ! which 7zz &>/dev/null; then
-    echo "Installing 7-zip..."
-    mkdir -p "$PWD/tools"
-    curl -sL https://www.7-zip.org/a/7z2408-linux-x64.tar.xz | tar -xJ -C "$PWD/tools"
-    if [ -f "$PWD/tools/7zz" ] && [ ! -f "$PWD/tools/7z" ]; then
-        ln -s 7zz "$PWD/tools/7z"
-    fi
-    export PATH="$PWD/tools:$PATH"
-elif which 7zz &>/dev/null && ! which 7z &>/dev/null; then
-    mkdir -p "$PWD/tools"
-    echo '#!/bin/bash' > "$PWD/tools/7z"
-    echo 'exec 7zz "$@"' >> "$PWD/tools/7z"
-    chmod +x "$PWD/tools/7z"
-    export PATH="$PWD/tools:$PATH"
+    echo "Attempting to install p7zip as fallback..."
+    (yum install -y p7zip 2>/dev/null || dnf install -y p7zip 2>/dev/null || apt-get install -y p7zip-full 2>/dev/null) \
+        && echo "p7zip installed." \
+        || echo "WARNING: Could not install p7zip. Will rely on Python zipfile."
 fi
 
 echo "Verifying tools..."
 aws --version
-7z | head -2
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 

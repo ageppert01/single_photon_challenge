@@ -10,7 +10,6 @@ the raw chunk.
 
 Requirements:
     - aws-cli  (https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-getting-started.html)
-    - 7z       (apt install p7zip-full)
 
 Usage:
     python scripts/preprocess_full_dataset.py --output-dir ./preprocessed
@@ -37,6 +36,7 @@ import shutil
 import subprocess
 import sys
 import time
+import zipfile
 from pathlib import Path
 
 # Allow imports of photoncube_preprocess:
@@ -352,9 +352,29 @@ def download_chunk(s3_key: str, download_dir: Path, max_retries: int = 5) -> Pat
 
 
 def extract_chunk(zip_path: Path, extract_dir: Path) -> None:
-    """Extract a zip file using 7z (handles LZMA compression)."""
-    cmd = ["7z", "x", str(zip_path), f"-o{extract_dir}", "-y"]
-    run_cmd(cmd, f"Extracting {zip_path.name}")
+    """Extract a zip file. Tries Python zipfile first, falls back to 7z."""
+    print(f"  Extracting {zip_path.name}")
+
+    # Try Python's built-in zipfile (supports LZMA since Python 3.3)
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(extract_dir)
+        return
+    except Exception as e:
+        print(f"  WARNING: Python zipfile failed ({e}), trying 7z...")
+
+    # Fall back to 7z / 7zz if available
+    sz = shutil.which("7z") or shutil.which("7zz")
+    if sz is None:
+        raise RuntimeError(
+            f"Cannot extract {zip_path.name}: Python zipfile failed (likely "
+            "missing LZMA support) and 7z is not installed. Install p7zip-full "
+            "or ensure Python has lzma support."
+        )
+    cmd = [sz, "x", str(zip_path), f"-o{extract_dir}", "-y"]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"7z extraction failed: {result.stderr}")
 
 
 def preprocess_photoncube_to_png(
@@ -582,7 +602,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     scratch_dir.mkdir(parents=True, exist_ok=True)
 
-    for tool in ["aws", "7z"]:
+    for tool in ["aws"]:
         if shutil.which(tool) is None:
             print(f"ERROR: '{tool}' not found on PATH. Please install it first.")
             sys.exit(1)
