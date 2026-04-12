@@ -9,6 +9,7 @@ Usage:
     python evaluate.py --max-images 50      # first 50 images
     python evaluate.py --best               # use best checkpoint
     python evaluate.py --steps 100          # override DDIM steps
+    python evaluate.py --avg-samples 4      # average 4 runs per image
 """
 
 from __future__ import annotations
@@ -62,6 +63,10 @@ def parse_args():
         help=f"DDIM eta (default: {SD_PALETTE_SAMPLE_CONFIG['eta']})",
     )
     parser.add_argument(
+        "--avg-samples", type=int, default=1,
+        help="Number of inference runs to average per image (default: 1)",
+    )
+    parser.add_argument(
         "--output-dir", type=str, default=None,
         help="Output directory (default: from config)",
     )
@@ -90,9 +95,10 @@ def run(args):
 
     num_steps = args.steps or SD_PALETTE_SAMPLE_CONFIG["num_steps"]
     eta = args.eta if args.eta is not None else SD_PALETTE_SAMPLE_CONFIG["eta"]
+    avg_samples = args.avg_samples
     max_images = 1 if args.quick else args.max_images
 
-    print(f"DDIM: {num_steps} steps, eta={eta}")
+    print(f"DDIM: {num_steps} steps, eta={eta}, avg_samples={avg_samples}")
     if max_images is not None:
         print(f"Processing up to {max_images} image(s)")
 
@@ -117,17 +123,26 @@ def run(args):
 
             measurement = measurement.to(device, dtype=torch.float16)
 
-            restored = sd_palette_inference(
-                unet=unet,
-                meas_vae=meas_vae,
-                vae=vae,
-                null_embeds=null_embeds,
-                measurement=measurement,
-                model_id=model_id,
-                device=device,
-                num_steps=num_steps,
-                eta=eta,
-            )
+            # ── Multi-sample averaging ────────────────────────────────
+            accum = None
+            for s in range(avg_samples):
+                sample = sd_palette_inference(
+                    unet=unet,
+                    meas_vae=meas_vae,
+                    vae=vae,
+                    null_embeds=null_embeds,
+                    measurement=measurement,
+                    model_id=model_id,
+                    device=device,
+                    num_steps=num_steps,
+                    eta=eta,
+                )
+                if accum is None:
+                    accum = sample.float()
+                else:
+                    accum += sample.float()
+
+            restored = (accum / avg_samples).clamp(-1, 1)
 
             if target is not None:
                 target = target.to(device)
@@ -173,7 +188,7 @@ def run(args):
     n = len(all_psnr)
     if n > 0:
         print(f"\n{'='*60}")
-        print(f"  Palette-SD Results ({n} images)")
+        print(f"  Palette-SD Results ({n} images, {avg_samples} avg samples)")
         print(f"{'='*60}")
         print(f"  Mean PSNR:    {statistics.mean(all_psnr):.4f} dB")
         print(f"  Mean MS-SSIM: {statistics.mean(all_msssim):.6f}")

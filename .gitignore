@@ -4,6 +4,7 @@
 
 *.pth
 
-diffusion/single_photon_palette/restoration/*.png
+diffusion/single_photon_palette_sd_v2/restoration/*.png
 
-hf_cache
+diffusion/hf_cache
+diffusion/run_tune.sh

@@ -11,7 +11,7 @@ universe = container
 ##########################################
 ############# Script to Run ##############
 #environment = "HF_TOKEN=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"
-executable = run_train.sh
+executable = run_tune.sh
 arguments = $(Process)
 
 ##########################################
@@ -48,7 +48,7 @@ when_to_transfer_output = ON_EXIT
 ##########################################
 ########## General Requirements ##########
 request_cpus = 6
-request_memory = 80GB
+request_memory = 40GB
 request_disk = 60GB
 
 ##########################################
@@ -56,10 +56,10 @@ request_disk = 60GB
 # For more info: https://chtc.cs.wisc.edu/uw-research-computing/gpu-jobs
 
 +WantGPULab = true
-+GPUJobLength = "long"
++GPUJobLength = "short"
 gpus_minimum_memory = 40GB
-+is_resumable = true
-request_gpus = 4
+#+is_resumable = true
+request_gpus = 1
 
 ##########################################
 ########## Number of Job Copies ##########

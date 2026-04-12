@@ -66,7 +66,7 @@ SD_PALETTE_TRAIN_CONFIG = {
     # ── Validation & best checkpoint ──────────────────────────────────────
     "val_size": 185,               # ~10% hold-out for validation
     "val_every_epochs": 20,        # run validation every N epochs
-    "val_num_steps": 50,           # DDIM steps for validation (fast)
+    "val_num_steps": 20,           # DDIM steps for validation (fast)
     "early_stopping_patience": 5,  # stop after N val rounds w/o improvement
 }
 
@@ -74,7 +74,7 @@ SD_PALETTE_TRAIN_CONFIG = {
 # ── Sampling / evaluation ────────────────────────────────────────────────────
 
 SD_PALETTE_SAMPLE_CONFIG = {
-    "num_steps": 1000,
+    "num_steps": 20,
     "eta": 0.0,
     "output_dir": f"{SD_PALETTE_TRAIN_CONFIG['task_name']}/restoration",
 }

@@ -421,6 +421,8 @@ def _process_single_npy(args_tuple):
      flow_tightness, num_warp) = args_tuple
 
     npy_path = Path(npy_path)
+    extract_dir = Path(extract_dir)
+    output_dir = Path(output_dir)
     rel_path = npy_path.relative_to(extract_dir)
     stem = rel_path.with_suffix("")
 
