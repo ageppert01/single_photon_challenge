@@ -37,10 +37,10 @@ transfer_input_files = \
     evaluate.py, \
     run_sample.sh, \
     requirements.txt, \
-    single_photon_palette_sd_v2
+    single_photon_palette_sd_v3_stage1
 
 # Transfer back checkpoint dir (now includes restoration outputs)
-transfer_output_files = single_photon_palette_sd_v2
+transfer_output_files = single_photon_palette_sd_v3_stage1
 when_to_transfer_output = ON_EXIT
 
 ##########################################

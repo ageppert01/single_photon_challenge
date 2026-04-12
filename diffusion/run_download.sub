@@ -16,7 +16,8 @@ transfer_input_files = \
     sd_utils.py, \
     utils.py, \
     eval_single.py, \
-    requirements.txt
+    requirements.txt, \
+    hf_cache
 
 transfer_output_files = hf_cache
 when_to_transfer_output = ON_EXIT

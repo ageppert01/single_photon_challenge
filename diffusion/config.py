@@ -10,7 +10,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 FULL_DATASET_CONFIG = {
     "dataset_source": "hf",
     "dataset_local_dir": "./preprocessed",
-    "dataset_hf_repo": "ageppert/single_photon_challenge_full_preprocessed",
+    "dataset_hf_repo": "ageppert/single_photon_challenge_full_preprocessed_adaptive",
     "dataset_hf_revision": "main",
 }
 
@@ -49,7 +49,7 @@ SD_PALETTE_MODEL_CONFIG = _SD_CONFIGS[SD_BACKBONE]
 # ── Training ─────────────────────────────────────────────────────────────────
 
 SD_PALETTE_TRAIN_CONFIG = {
-    "task_name": "single_photon_palette_sd_v2",
+    "task_name": "single_photon_palette_sd_v3_stage1",
 
     "batch_size": 6,
     "num_epochs": 2000,
