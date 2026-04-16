@@ -360,7 +360,7 @@ def sd_palette_inference(
     measurement: torch.Tensor,
     model_id: str,
     device: torch.device,
-    num_steps: int = 50,
+    num_steps: int = 20,
     eta: float = 0.0,
 ) -> torch.Tensor:
     """

@@ -8,3 +8,4 @@ diffusion/single_photon_palette_sd_v2/restoration/*.png
 
 diffusion/hf_cache
 diffusion/run_tune.sh
+diffusion/submission.zip
