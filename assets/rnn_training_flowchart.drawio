@@ -1,0 +1,136 @@
+<mxfile>
+  <diagram name="RNN Training Pipeline" id="rnn-train">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="700" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- Input .npy -->
+        <mxCell id="2" value="&lt;b&gt;Bitpacked .npy&lt;/b&gt;&lt;br&gt;(1024 frames)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1a2744;fontColor=#ffffff;strokeColor=#1a2744;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="40" y="60" width="180" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Unpack -->
+        <mxCell id="3" value="&lt;b&gt;Unpack bits&lt;/b&gt;&lt;br&gt;1024 × 800 × 800 × 3&lt;br&gt;binary {0,1}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1a2744;fontColor=#ffffff;strokeColor=#1a2744;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="40" y="170" width="180" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrow 2→3 -->
+        <mxCell id="a1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;" edge="1" source="2" target="3" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Downsample -->
+        <mxCell id="4" value="&lt;b&gt;Downsample&lt;/b&gt;&lt;br&gt;scale 0.5 → 400×400" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1a2744;fontColor=#ffffff;strokeColor=#1a2744;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="40" y="290" width="180" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrow 3→4 -->
+        <mxCell id="a2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;" edge="1" source="3" target="4" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Chunk -->
+        <mxCell id="5" value="&lt;b&gt;Split into chunks&lt;/b&gt;&lt;br&gt;64 frames each" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1a2744;fontColor=#ffffff;strokeColor=#1a2744;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="40" y="400" width="180" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrow 4→5 -->
+        <mxCell id="a3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;" edge="1" source="4" target="5" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- ConvLSTM -->
+        <mxCell id="6" value="&lt;b&gt;ConvLSTM&lt;/b&gt;&lt;br&gt;Processes chunks sequentially&lt;br&gt;carries (h, c) across chunks" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2c3e6b;fontColor=#ffffff;strokeColor=#1a2744;strokeWidth=2;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="310" y="380" width="220" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrow 5→6 -->
+        <mxCell id="a4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;" edge="1" source="5" target="6" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Final h -->
+        <mxCell id="7" value="&lt;b&gt;Final hidden&lt;br&gt;state h&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1a2744;fontColor=#ffffff;strokeColor=#1a2744;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="600" y="390" width="130" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrow 6→7 -->
+        <mxCell id="a5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;" edge="1" source="6" target="7" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Decoder -->
+        <mxCell id="8" value="&lt;b&gt;Decoder Head&lt;/b&gt;&lt;br&gt;Conv → ReLU → Conv → Sigmoid" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1a2744;fontColor=#ffffff;strokeColor=#1a2744;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="800" y="390" width="210" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrow 7→8 -->
+        <mxCell id="a6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;" edge="1" source="7" target="8" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Decoded image -->
+        <mxCell id="9" value="&lt;b&gt;Decoded image&lt;/b&gt;&lt;br&gt;(3 × 400 × 400)&lt;br&gt;values in [0, 1]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1a2744;fontColor=#ffffff;strokeColor=#1a2744;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="385" width="170" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrow 8→9 -->
+        <mxCell id="a7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;" edge="1" source="8" target="9" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- GT PNG -->
+        <mxCell id="10" value="&lt;b&gt;Ground Truth .png&lt;/b&gt;&lt;br&gt;(800 × 800 × 3)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#34495e;fontColor=#ffffff;strokeColor=#34495e;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="800" y="100" width="180" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Downsample GT -->
+        <mxCell id="11" value="&lt;b&gt;Downsample GT&lt;/b&gt;&lt;br&gt;to 400 × 400" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#34495e;fontColor=#ffffff;strokeColor=#34495e;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="100" width="170" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrow 10→11 -->
+        <mxCell id="a8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;" edge="1" source="10" target="11" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- L1 Loss -->
+        <mxCell id="12" value="&lt;b&gt;L1 Loss&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c0392b;fontColor=#ffffff;strokeColor=#c0392b;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1110" y="230" width="110" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrow 11→12 -->
+        <mxCell id="a9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;" edge="1" source="11" target="12" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrow 9→12 -->
+        <mxCell id="a10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;" edge="1" source="9" target="12" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Backprop -->
+        <mxCell id="13" value="&lt;b&gt;Backprop +&lt;br&gt;Adam optimizer&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e74c3c;fontColor=#ffffff;strokeColor=#c0392b;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="910" y="223" width="140" height="56" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrow 12→13 -->
+        <mxCell id="a11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;" edge="1" source="12" target="13" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Dashed arrow back to ConvLSTM -->
+        <mxCell id="a12" value="update weights" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;dashed=1;fontSize=11;" edge="1" source="13" target="6" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="980" y="310"/>
+              <mxPoint x="420" y="310"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
