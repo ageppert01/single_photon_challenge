@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+stage1_checkpoints/
+.venv/
+*.pt
