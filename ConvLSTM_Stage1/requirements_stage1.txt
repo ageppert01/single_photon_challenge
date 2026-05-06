@@ -1,0 +1,15 @@
+# Stage 1: RNN (ConvLSTM) + decoder + validation
+# Install: pip install -r requirements_stage1.txt
+
+torch>=2.0
+numpy>=1.20
+# For loading GT PNGs (use one of)
+imageio>=2.9
+# Pillow>=9.0
+
+# For validation metrics (same as eval_single.py)
+pytorch-msssim>=0.2
+lpips>=0.1
+
+# Optional: training from Hugging Face
+huggingface_hub>=0.20
