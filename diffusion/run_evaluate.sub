@@ -1,0 +1,63 @@
+# run_evaluate.sub
+
+##########################################
+############### Containers ###############
+# For more info: https://chtc.cs.wisc.edu/uw-research-computing/docker-jobs
+# For more info: https://chtc.cs.wisc.edu/uw-research-computing/apptainer-htc
+
+container_image = docker://nvcr.io/nvidia/pytorch:23.08-py3
+universe = container
+
+##########################################
+############# Script to Run ##############
+#environment = "HF_TOKEN=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"
+executable = run_sample.sh
+arguments = $(Process)
+
+##########################################
+############## Logs Configs ##############
+JobName = palette_sd_eval
+log = logs/$(JobName)_$(Cluster)_$(Process).log
+error = logs/$(JobName)_$(Cluster)_$(Process).err
+output = logs/$(JobName)_$(Cluster)_$(Process).out
+
+##########################################
+############# File Transfer  #############
+# For more info: https://chtc.cs.wisc.edu/uw-research-computing/htc-job-file-transfer#default-behavior-for-transferring-output-files
+
+should_transfer_files = YES
+
+# Source code + trained checkpoint
+transfer_input_files = \
+    config.py, \
+    dataset.py, \
+    sd_utils.py, \
+    utils.py, \
+    eval_single.py, \
+    evaluate.py, \
+    run_sample.sh, \
+    requirements.txt, \
+    single_photon_palette_sd_v3_stage1
+
+# Transfer back checkpoint dir (now includes restoration outputs)
+transfer_output_files = single_photon_palette_sd_v3_stage1
+when_to_transfer_output = ON_EXIT
+
+##########################################
+########## General Requirements ##########
+request_cpus = 4
+request_memory = 40GB
+request_disk = 60GB
+
+##########################################
+############ GPU Requirements ############
+# For more info: https://chtc.cs.wisc.edu/uw-research-computing/gpu-jobs
+
++WantGPULab = true
++GPUJobLength = "short"
+gpus_minimum_memory = 40GB
+request_gpus = 1
+
+##########################################
+########## Number of Job Copies ##########
+queue 1

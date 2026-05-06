@@ -1,0 +1,61 @@
+# preprocess_and_upload.sub — Preprocess full dataset + upload to HuggingFace
+#
+# Preprocesses photoncubes into PNG pairs on local scratch, then uploads
+# everything to HuggingFace before the job ends. The compute node's disk
+# is ephemeral — HuggingFace is the durable storage.
+#
+# REPO_ID and HF_TOKEN are required.
+#
+# Usage (from scripts/):
+#   mkdir -p ../logs
+#   condor_submit preprocess_and_upload.sub \
+#       REPO_ID=your-username/spc-preprocessed \
+#       HF_TOKEN=hf_xxxxx
+#
+#   # Private repo:
+#   condor_submit preprocess_and_upload.sub \
+#       REPO_ID=your-username/spc-preprocessed \
+#       HF_TOKEN=hf_xxxxx \
+#       PRIVATE=true
+#
+#   # Override preprocessing defaults:
+#   condor_submit preprocess_and_upload.sub \
+#       REPO_ID=your-username/spc-preprocessed \
+#       HF_TOKEN=hf_xxxxx \
+#       K=128
+
+universe   = vanilla
+executable = run_preprocess_and_upload.sh
+
+log    = logs/preprocess_$(Cluster).log
+output = logs/preprocess_$(Cluster).out
+error  = logs/preprocess_$(Cluster).err
+
+# Preprocessing defaults (override on command line)
+SPLIT              =
+K                  = 256
+REG_BLOCK_SIZE     = 8
+OVERLAP_THRESHOLD  = 0.45
+USE_DENSE_FLOW     = true
+FLOW_ATTACHMENT    = 15
+FLOW_TIGHTNESS     = 0.3
+NUM_WARP           = 5
+NUM_WORKERS        = 0
+
+# Upload settings (required)
+REPO_ID  = ageppert/single_photon_challenge_full_preprocessed_adaptive
+HF_TOKEN = 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
+PRIVATE  = false
+
+request_cpus   = 37
+request_memory = 60GB
+request_disk   = 60GB
+
+environment = "SPLIT=$(SPLIT) K=$(K) REG_BLOCK_SIZE=$(REG_BLOCK_SIZE) OVERLAP_THRESHOLD=$(OVERLAP_THRESHOLD) USE_DENSE_FLOW=$(USE_DENSE_FLOW) FLOW_ATTACHMENT=$(FLOW_ATTACHMENT) FLOW_TIGHTNESS=$(FLOW_TIGHTNESS) NUM_WARP=$(NUM_WARP) NUM_WORKERS=$(NUM_WORKERS) REPO_ID=$(REPO_ID) HF_TOKEN=$(HF_TOKEN) PRIVATE=$(PRIVATE)"
+
+should_transfer_files   = YES
+transfer_input_files    = preprocess_full_dataset.py, upload_to_hf.py, photoncube_preprocess.py
+
+# No transfer_output_files — data is uploaded to HuggingFace, not transferred back
+
+queue 1

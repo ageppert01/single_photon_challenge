@@ -1,0 +1,29 @@
+# run_download.sub — one-time job to populate hf_cache
+container_image = docker://nvcr.io/nvidia/pytorch:23.08-py3
+universe = container
+
+executable = run_download.sh
+
+JobName = hf_download
+log = logs/$(JobName)_$(Cluster).log
+error = logs/$(JobName)_$(Cluster).err
+output = logs/$(JobName)_$(Cluster).out
+
+should_transfer_files = YES
+transfer_input_files = \
+    config.py, \
+    dataset.py, \
+    sd_utils.py, \
+    utils.py, \
+    eval_single.py, \
+    requirements.txt, \
+    hf_cache
+
+transfer_output_files = hf_cache
+when_to_transfer_output = ON_EXIT
+
+request_cpus = 1
+request_memory = 8GB
+request_disk = 30GB
+
+queue 1

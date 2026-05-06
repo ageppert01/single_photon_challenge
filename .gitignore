@@ -3,3 +3,14 @@ __pycache__/
 stage1_checkpoints/
 .venv/
 *.pt
+*.err
+*.log
+*.out
+
+*.pth
+
+diffusion/single_photon_palette_sd_v2/restoration/*.png
+
+diffusion/hf_cache
+diffusion/run_tune.sh
+diffusion/submission.zip
