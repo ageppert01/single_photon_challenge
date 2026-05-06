@@ -1,0 +1,68 @@
+# run_diffusion.sub
+
+##########################################
+############### Containers ###############
+# For more info: https://chtc.cs.wisc.edu/uw-research-computing/docker-jobs
+# For more info: https://chtc.cs.wisc.edu/uw-research-computing/apptainer-htc
+
+container_image = docker://nvcr.io/nvidia/pytorch:23.08-py3
+universe = container
+
+##########################################
+############# Script to Run ##############
+#environment = "HF_TOKEN=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"
+executable = run_train.sh
+arguments = $(Process)
+
+##########################################
+############## Logs Configs ##############
+JobName = palette_sd_train_v3_stage1
+log = logs/$(JobName)_$(Cluster)_$(Process).log
+error = logs/$(JobName)_$(Cluster)_$(Process).err
+output = logs/$(JobName)_$(Cluster)_$(Process).out
+
+##########################################
+############# File Transfer  #############
+# For more info: https://chtc.cs.wisc.edu/uw-research-computing/htc-job-file-transfer#default-behavior-for-transferring-output-files
+
+should_transfer_files = YES
+
+# Source code
+transfer_input_files = \
+    config.py, \
+    dataset.py, \
+    sd_utils.py, \
+    utils.py, \
+    eval_single.py, \
+    train_palette_sd.py, \
+    evaluate.py, \
+    run_train.sh, \
+    requirements.txt, \
+    single_photon_palette_sd_v3_stage1, \
+    hf_cache
+
+# Only transfer checkpoint dir back
+transfer_output_files = single_photon_palette_sd_v3_stage1
+when_to_transfer_output = ON_EXIT
+
+##########################################
+########## General Requirements ##########
+request_cpus = 6
+request_memory = 80GB
+request_disk = 60GB
+
+##########################################
+############ GPU Requirements ############
+# For more info: https://chtc.cs.wisc.edu/uw-research-computing/gpu-jobs
+
++WantGPULab = true
++GPUJobLength = "long"
+gpus_minimum_memory = 40GB
++is_resumable = true
+request_gpus = 4
+
++RequireExclusiveGPU = true
+
+##########################################
+########## Number of Job Copies ##########
+queue 1
