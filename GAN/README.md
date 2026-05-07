@@ -1,4 +1,4 @@
-# Photon — SPAD Denoising with a Conditional GAN
+# SPAD Denoising with a Conditional GAN
 
 Pix2Pix-style conditional GAN that denoises SPAD (single-photon avalanche diode) images across 7 photon budgets (16–1024) simultaneously.
 
